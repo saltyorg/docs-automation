@@ -1,0 +1,7 @@
+# IDE files
+.vscode/
+.idea/
+.claude
+
+# Golang
+build/

@@ -1,0 +1,115 @@
+name: Build and Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: 'sb-docs'
+  GITHUB_REPO: 'github.com/saltyorg/docs-automation'
+
+jobs:
+  build_and_release:
+    name: Build and Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.determine_version.outputs.version }}
+      git_commit: ${{ steps.get_git_commit.outputs.short_sha }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Get Git Commit SHA
+        id: get_git_commit
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Determine Version
+        id: determine_version
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=0.0.0-dev" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        env:
+          VERSION: ${{ steps.determine_version.outputs.version }}
+          GIT_COMMIT: ${{ steps.get_git_commit.outputs.short_sha }}
+          GOOS: linux
+          GOARCH: amd64
+          CGO_ENABLED: 0
+        run: |
+          ldflags="-w -s -X '${GITHUB_REPO}/internal/runtime.Version=${VERSION}' -X '${GITHUB_REPO}/internal/runtime.GitCommit=${GIT_COMMIT}' -X '${GITHUB_REPO}/internal/runtime.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+
+          # For GitHub releases, use the selfupdate naming convention
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            OUTPUT_NAME="${APP_NAME}_${GOOS}_${GOARCH}"
+          else
+            OUTPUT_NAME="${APP_NAME}"
+          fi
+
+          go build -trimpath -ldflags="${ldflags}" -o ${OUTPUT_NAME} .
+
+      - name: Upload Artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.APP_NAME }}
+          path: ${{ env.APP_NAME }}
+
+      - name: Generate Release Notes
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        id: release_notes
+        run: |
+          # Get the previous tag
+          PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          # Create release notes
+          echo "## What's Changed" > release_notes.md
+          echo "" >> release_notes.md
+
+          if [ -n "$PREVIOUS_TAG" ]; then
+            echo "### Commits since $PREVIOUS_TAG:" >> release_notes.md
+            echo "" >> release_notes.md
+
+            # Get commits between previous tag and current commit
+            git log --pretty=format:"- %s (%h)" "$PREVIOUS_TAG"..HEAD >> release_notes.md
+          else
+            echo "### Commits in this release:" >> release_notes.md
+            echo "" >> release_notes.md
+
+            # Get all commits if this is the first tag
+            git log --pretty=format:"- %s (%h)" >> release_notes.md
+          fi
+
+          echo "" >> release_notes.md
+          echo "" >> release_notes.md
+          echo "**Full Changelog**: https://github.com/saltyorg/docs-automation/compare/$PREVIOUS_TAG...${{ steps.determine_version.outputs.version }}" >> release_notes.md
+
+      - name: Create GitHub Release
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.determine_version.outputs.version }}
+          name: Release ${{ steps.determine_version.outputs.version }}
+          draft: false
+          body_path: release_notes.md
+          prerelease: false
+          files: ${{ env.APP_NAME }}_linux_amd64

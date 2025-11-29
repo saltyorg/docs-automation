@@ -100,7 +100,11 @@ func (m *IssueManager) GenerateIssueBody(result *CheckResult) string {
 
 // GenerateIssueTitle generates the issue title.
 func (m *IssueManager) GenerateIssueTitle(result *CheckResult) string {
-	return fmt.Sprintf("[Docs Automation] %d documentation issue(s) found", result.TotalIssues())
+	count := result.TotalIssues()
+	if count == 1 {
+		return "[Docs Automation] 1 documentation issue found"
+	}
+	return fmt.Sprintf("[Docs Automation] %d documentation issues found", count)
 }
 
 // OutputGitHubActions outputs GitHub Actions workflow commands.

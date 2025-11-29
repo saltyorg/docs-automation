@@ -41,7 +41,7 @@ func (e *Engine) LoadString(name, content string) error {
 }
 
 // Render renders a template with the given data.
-func (e *Engine) Render(name string, data interface{}) (string, error) {
+func (e *Engine) Render(name string, data any) (string, error) {
 	tmpl, ok := e.templates[name]
 	if !ok {
 		return "", fmt.Errorf("template %q not found", name)
@@ -56,7 +56,7 @@ func (e *Engine) Render(name string, data interface{}) (string, error) {
 }
 
 // RenderString parses and renders a template string in one step.
-func (e *Engine) RenderString(content string, data interface{}) (string, error) {
+func (e *Engine) RenderString(content string, data any) (string, error) {
 	tmpl, err := template.New("inline").Funcs(FuncMap()).Parse(content)
 	if err != nil {
 		return "", fmt.Errorf("parsing template: %w", err)

@@ -84,8 +84,8 @@ func (s *DockerVarScanner) GetDockerVarSuffixes(roleName string, roleDockerVars 
 	prefix := roleName + "_role_docker_"
 	roleVarSuffixes := make(map[string]bool)
 	for _, varName := range roleDockerVars {
-		if strings.HasPrefix(varName, prefix) {
-			suffix := strings.TrimPrefix(varName, prefix)
+		if after, ok := strings.CutPrefix(varName, prefix); ok {
+			suffix := after
 			roleVarSuffixes[suffix] = true
 		}
 	}

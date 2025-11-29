@@ -122,10 +122,7 @@ func renderMultilineValueAdjusted(originalName, newName string, valueLines []str
 			// Only adjust if the indentation is >= original alignment
 			// (this preserves dict/list structure indentation that's less than the value alignment)
 			if leadingSpaces >= originalIndent {
-				newSpaces := leadingSpaces - indentDiff
-				if newSpaces < 0 {
-					newSpaces = 0
-				}
+				newSpaces := max(leadingSpaces-indentDiff, 0)
 				result.WriteString(strings.Repeat(" ", newSpaces))
 				result.WriteString(strings.TrimLeft(line, " "))
 			} else {
@@ -191,10 +188,7 @@ func adjustMultilineIndent(lines []string, originalName, newName string) []strin
 		}
 
 		currentIndent := len(line) - len(trimmed)
-		newIndent := currentIndent + diff
-		if newIndent < 0 {
-			newIndent = 0
-		}
+		newIndent := max(currentIndent+diff, 0)
 
 		result[i] = strings.Repeat(" ", newIndent) + trimmed
 	}
@@ -205,14 +199,14 @@ func adjustMultilineIndent(lines []string, originalName, newName string) []strin
 // generateInstanceName converts a role-level variable name to instance-level.
 func generateInstanceName(varName, roleName, instanceName string) string {
 	rolePrefix := roleName + "_role_"
-	if strings.HasPrefix(varName, rolePrefix) {
-		suffix := strings.TrimPrefix(varName, rolePrefix)
+	if after, ok := strings.CutPrefix(varName, rolePrefix); ok {
+		suffix := after
 		return instanceName + "_" + suffix
 	}
 
 	roleSimplePrefix := roleName + "_"
-	if strings.HasPrefix(varName, roleSimplePrefix) {
-		suffix := strings.TrimPrefix(varName, roleSimplePrefix)
+	if after, ok := strings.CutPrefix(varName, roleSimplePrefix); ok {
+		suffix := after
 		if suffix == "instances" {
 			return varName
 		}

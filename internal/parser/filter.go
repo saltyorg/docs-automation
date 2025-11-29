@@ -48,16 +48,16 @@ func GenerateInstanceName(varName, roleName, instanceName string) string {
 	// The instance-level pattern is: {instance}_{suffix}
 	rolePrefix := roleName + "_role_"
 
-	if strings.HasPrefix(varName, rolePrefix) {
-		suffix := strings.TrimPrefix(varName, rolePrefix)
+	if after, ok := strings.CutPrefix(varName, rolePrefix); ok {
+		suffix := after
 		return instanceName + "_" + suffix
 	}
 
 	// Also handle variables like {role}_instances -> {instance}_instances doesn't make sense
 	// but {role}_{suffix} -> {instance}_{suffix} does
 	roleSimplePrefix := roleName + "_"
-	if strings.HasPrefix(varName, roleSimplePrefix) {
-		suffix := strings.TrimPrefix(varName, roleSimplePrefix)
+	if after, ok := strings.CutPrefix(varName, roleSimplePrefix); ok {
+		suffix := after
 		// Don't transform if it's the instances variable itself
 		if suffix == "instances" {
 			return varName
@@ -99,10 +99,7 @@ func AdjustMultilineIndent(lines []string, originalName, newName string) []strin
 		currentIndent := len(line) - len(trimmed)
 
 		// Adjust indentation
-		newIndent := currentIndent + diff
-		if newIndent < 0 {
-			newIndent = 0
-		}
+		newIndent := max(currentIndent+diff, 0)
 
 		result[i] = strings.Repeat(" ", newIndent) + trimmed
 	}

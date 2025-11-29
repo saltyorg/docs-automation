@@ -68,7 +68,7 @@ func (g *TableGenerator) Generate(automation *docs.SaltboxAutomationConfig) (str
 
 	for i := 0; i < len(links); i += 3 {
 		row := make([]string, 3)
-		for j := 0; j < 3; j++ {
+		for j := range 3 {
 			if i+j < len(links) {
 				row[j] = formatLink(links[i+j])
 			} else {

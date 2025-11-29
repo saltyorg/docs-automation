@@ -257,6 +257,7 @@ func (m *IssueManager) ManageIssue(result *CheckResult, label string) error {
 // findExistingIssue finds an existing issue with the given label.
 func (m *IssueManager) findExistingIssue(label string) (*ghIssue, error) {
 	cmd := exec.Command("gh", "issue", "list",
+		"--repo", m.repo,
 		"--label", label,
 		"--state", "all",
 		"--limit", "1",
@@ -285,6 +286,7 @@ func (m *IssueManager) findExistingIssue(label string) (*ghIssue, error) {
 // createIssue creates a new GitHub issue and returns its number.
 func (m *IssueManager) createIssue(title, body, label string) (int, error) {
 	cmd := exec.Command("gh", "issue", "create",
+		"--repo", m.repo,
 		"--title", title,
 		"--body", body,
 		"--label", label)
@@ -313,6 +315,7 @@ func (m *IssueManager) createIssue(title, body, label string) (int, error) {
 // updateIssue updates an existing GitHub issue.
 func (m *IssueManager) updateIssue(number int, title, body string) error {
 	cmd := exec.Command("gh", "issue", "edit",
+		"--repo", m.repo,
 		fmt.Sprintf("%d", number),
 		"--title", title,
 		"--body", body)
@@ -329,7 +332,7 @@ func (m *IssueManager) updateIssue(number int, title, body string) error {
 
 // closeIssue closes a GitHub issue.
 func (m *IssueManager) closeIssue(number int) error {
-	cmd := exec.Command("gh", "issue", "close", fmt.Sprintf("%d", number))
+	cmd := exec.Command("gh", "issue", "close", "--repo", m.repo, fmt.Sprintf("%d", number))
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -343,7 +346,7 @@ func (m *IssueManager) closeIssue(number int) error {
 
 // reopenIssue reopens a closed GitHub issue.
 func (m *IssueManager) reopenIssue(number int) error {
-	cmd := exec.Command("gh", "issue", "reopen", fmt.Sprintf("%d", number))
+	cmd := exec.Command("gh", "issue", "reopen", "--repo", m.repo, fmt.Sprintf("%d", number))
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -358,6 +361,7 @@ func (m *IssueManager) reopenIssue(number int) error {
 // addComment adds a comment to a GitHub issue.
 func (m *IssueManager) addComment(number int, body string) error {
 	cmd := exec.Command("gh", "issue", "comment",
+		"--repo", m.repo,
 		fmt.Sprintf("%d", number),
 		"--body", body)
 
@@ -373,7 +377,7 @@ func (m *IssueManager) addComment(number int, body string) error {
 
 // pinIssue pins an issue to the repository.
 func (m *IssueManager) pinIssue(number int) error {
-	cmd := exec.Command("gh", "issue", "pin", fmt.Sprintf("%d", number))
+	cmd := exec.Command("gh", "issue", "pin", "--repo", m.repo, fmt.Sprintf("%d", number))
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -387,7 +391,7 @@ func (m *IssueManager) pinIssue(number int) error {
 
 // unpinIssue unpins an issue from the repository.
 func (m *IssueManager) unpinIssue(number int) error {
-	cmd := exec.Command("gh", "issue", "unpin", fmt.Sprintf("%d", number))
+	cmd := exec.Command("gh", "issue", "unpin", "--repo", m.repo, fmt.Sprintf("%d", number))
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

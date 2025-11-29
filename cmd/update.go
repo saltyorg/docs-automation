@@ -148,9 +148,10 @@ func updateAllRoles(cfg *config.Config) error {
 
 	// Update CLI help unless --no-cli was specified
 	if !updateNoCLI {
-		if err := updateCLIHelp(cfg); err != nil {
+		changed, err := updateCLIHelp(cfg)
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: failed to update CLI help: %v\n", err)
-		} else {
+		} else if changed {
 			summary.CLIUpdated = true
 		}
 	}

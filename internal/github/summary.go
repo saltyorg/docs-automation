@@ -95,6 +95,7 @@ func (s *UpdateSummary) WriteGitHubSummary() error {
 	sb.WriteString("|--------|-------|\n")
 	sb.WriteString(fmt.Sprintf("| Roles Processed | %d |\n", s.TotalRoles))
 	sb.WriteString(fmt.Sprintf("| ✅ Updated | %d |\n", s.Updated))
+	sb.WriteString(fmt.Sprintf("| ➖ Unchanged | %d |\n", s.Unchanged))
 	sb.WriteString(fmt.Sprintf("| ⏭️ Skipped | %d |\n", s.Skipped))
 	sb.WriteString(fmt.Sprintf("| ❌ Errors | %d |\n", s.Errors))
 	if s.CLIUpdated {

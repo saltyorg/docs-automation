@@ -121,9 +121,10 @@ func updateAllRoles(cfg *config.Config) error {
 		result := updateRoleWithResult(cfg, role, "saltbox")
 		summary.AddRole(result)
 
-		if result.Status == github.StatusSkipped {
+		switch result.Status {
+		case github.StatusSkipped:
 			fmt.Printf("Skipping %s: %s\n", role, result.SkipReason)
-		} else if result.Status == github.StatusError {
+		case github.StatusError:
 			fmt.Fprintf(os.Stderr, "Error: failed to update %s: %s\n", role, result.Error)
 		}
 	}
@@ -135,14 +136,15 @@ func updateAllRoles(cfg *config.Config) error {
 		result := updateRoleWithResult(cfg, role, "sandbox")
 		summary.AddRole(result)
 
-		if result.Status == github.StatusSkipped {
+		switch result.Status {
+		case github.StatusSkipped:
 			fmt.Printf("Skipping %s: %s\n", role, result.SkipReason)
-		} else if result.Status == github.StatusError {
+		case github.StatusError:
 			fmt.Fprintf(os.Stderr, "Error: failed to update %s: %s\n", role, result.Error)
 		}
 	}
 
-	fmt.Printf("Updated %d roles, %d skipped, %d errors\n", summary.Updated, summary.Skipped, summary.Errors)
+	fmt.Printf("Updated %d roles, %d unchanged, %d skipped, %d errors\n", summary.Updated, summary.Unchanged, summary.Skipped, summary.Errors)
 
 	// Update CLI help unless --no-cli was specified
 	if !updateNoCLI {
@@ -269,6 +271,9 @@ func updateRoleWithResult(cfg *config.Config, roleName, repoType string) github.
 		return result
 	}
 
+	// Store original content to detect actual changes
+	originalContent := doc.Content
+
 	// Check if automation is disabled
 	if manager.IsAutomationDisabled(doc) {
 		result.Status = github.StatusSkipped
@@ -339,6 +344,12 @@ func updateRoleWithResult(cfg *config.Config, roleName, repoType string) github.
 	if len(result.Sections) == 0 {
 		result.Status = github.StatusSkipped
 		result.SkipReason = "no enabled sections to update"
+		return result
+	}
+
+	// Check if content actually changed
+	if doc.Content == originalContent {
+		result.Status = github.StatusUnchanged
 		return result
 	}
 

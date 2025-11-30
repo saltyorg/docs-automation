@@ -89,8 +89,11 @@ func (p *Parser) ParseFile(path string) (*RoleInfo, error) {
 				nextLine := lines[lineNum]
 				if matches := sectionNameRe.FindStringSubmatch(strings.TrimSpace(nextLine)); matches != nil {
 					sectionName := matches[1]
-					// Skip header/copyright sections
-					if !isMetaSection(sectionName) {
+					// Skip header/copyright sections and paths section
+					if isMetaSection(sectionName) {
+						state.SkipSection = true
+					} else {
+						state.SkipSection = false
 						state.CurrentSection = sectionName
 						state.CurrentSubsection = ""
 						state.InSubsection = false
@@ -175,6 +178,13 @@ func (p *Parser) ParseFile(path string) (*RoleInfo, error) {
 		if matches := variableRe.FindStringSubmatch(line); matches != nil {
 			varName := matches[1]
 			varValue := matches[2]
+
+			// Skip variables in skipped sections (e.g., Paths)
+			if state.SkipSection {
+				state.PendingComment = ""
+				lineNum = consumeMultilineValue(lines, lineNum, varValue)
+				continue
+			}
 
 			// Check if this variable should be skipped
 			if shouldSkipVariable(varName, state.PendingComment) {
@@ -270,16 +280,12 @@ func isMetaSection(name string) bool {
 		strings.Contains(lower, "author") ||
 		strings.Contains(lower, "url:") ||
 		strings.Contains(lower, "gnu general public license") ||
-		strings.Contains(lower, "copyright")
+		strings.Contains(lower, "copyright") ||
+		lower == "paths"
 }
 
 // shouldSkipVariable checks if a variable should be excluded from documentation.
 func shouldSkipVariable(name, comment string) bool {
-	// Skip _paths_folders_list variables
-	if strings.Contains(name, "_paths_folders_list") {
-		return true
-	}
-
 	// Skip if comment contains skip markers
 	if skipDocsRe.MatchString(comment) || skipInventoryRe.MatchString(comment) {
 		return true

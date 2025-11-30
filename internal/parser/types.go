@@ -46,4 +46,5 @@ type ParserState struct {
 	PendingComment    string
 	GlobalComment     string
 	InSubsection      bool
+	SkipSection       bool // True when current section should be excluded from docs
 }

@@ -2,6 +2,7 @@ package parser
 
 import (
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -75,10 +76,13 @@ func TestParseFile(t *testing.T) {
 		t.Error("Expected plex to have HasThemePark=true")
 	}
 
-	// Check that _paths_folders_list was filtered
-	for _, v := range role.AllVariables {
-		if v.Name == "plex_role_paths_folders_list" {
-			t.Error("Expected plex_role_paths_folders_list to be filtered out")
+	// Check that paths section was filtered out entirely
+	if _, exists := role.Sections["Paths"]; exists {
+		t.Error("Expected Paths section to be filtered out")
+	}
+	for _, section := range role.SectionOrder {
+		if strings.EqualFold(section, "paths") {
+			t.Error("Expected paths section to not be in SectionOrder")
 		}
 	}
 

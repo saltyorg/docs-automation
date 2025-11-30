@@ -13,6 +13,7 @@ import (
 type IssueManager struct {
 	repo        string // Repository in format "owner/repo"
 	workflowURL string // URL to the workflow run
+	branch      string // Branch name for links
 }
 
 // NewIssueManager creates a new GitHub issue manager.
@@ -20,25 +21,26 @@ func NewIssueManager(repo, workflowURL string) *IssueManager {
 	return &IssueManager{
 		repo:        repo,
 		workflowURL: workflowURL,
+		branch:      GetBranch(),
 	}
 }
 
 // CheckResult holds the results of coverage checks.
 type CheckResult struct {
-	MissingDocs            []string // Roles without documentation
-	MissingSections        []string // Docs without managed variables sections
-	MissingDetailsSections []string // Docs without managed details sections
-	OrphanedDocs           []string // Docs without corresponding roles
+	MissingDocs             []string // Roles without documentation
+	MissingSections         []string // Docs without managed variables sections
+	MissingOverviewSections []string // Docs without managed overview sections
+	OrphanedDocs            []string // Docs without corresponding roles
 }
 
 // HasIssues returns true if there are any problems.
 func (r *CheckResult) HasIssues() bool {
-	return len(r.MissingDocs) > 0 || len(r.MissingSections) > 0 || len(r.MissingDetailsSections) > 0 || len(r.OrphanedDocs) > 0
+	return len(r.MissingDocs) > 0 || len(r.MissingSections) > 0 || len(r.MissingOverviewSections) > 0 || len(r.OrphanedDocs) > 0
 }
 
 // TotalIssues returns the total number of issues.
 func (r *CheckResult) TotalIssues() int {
-	return len(r.MissingDocs) + len(r.MissingSections) + len(r.MissingDetailsSections) + len(r.OrphanedDocs)
+	return len(r.MissingDocs) + len(r.MissingSections) + len(r.MissingOverviewSections) + len(r.OrphanedDocs)
 }
 
 // GenerateIssueBody generates the markdown body for a GitHub issue.
@@ -62,19 +64,19 @@ func (m *IssueManager) GenerateIssueBody(result *CheckResult) string {
 		for _, doc := range result.MissingSections {
 			// Convert path to GitHub link
 			docName := extractDocName(doc)
-			link := fmt.Sprintf("https://github.com/%s/blob/main/%s", m.repo, doc)
+			link := fmt.Sprintf("https://github.com/%s/blob/%s/%s", m.repo, m.branch, doc)
 			builder.WriteString(fmt.Sprintf("- [ ] [%s](%s)\n", docName, link))
 		}
 		builder.WriteString("\n")
 	}
 
-	if len(result.MissingDetailsSections) > 0 {
-		builder.WriteString(fmt.Sprintf("### Missing Details Sections (%d)\n", len(result.MissingDetailsSections)))
-		builder.WriteString("Documentation pages without the managed details section:\n\n")
-		for _, doc := range result.MissingDetailsSections {
+	if len(result.MissingOverviewSections) > 0 {
+		builder.WriteString(fmt.Sprintf("### Missing Overview Sections (%d)\n", len(result.MissingOverviewSections)))
+		builder.WriteString("Documentation pages without the managed overview section:\n\n")
+		for _, doc := range result.MissingOverviewSections {
 			// Convert path to GitHub link
 			docName := extractDocName(doc)
-			link := fmt.Sprintf("https://github.com/%s/blob/main/%s", m.repo, doc)
+			link := fmt.Sprintf("https://github.com/%s/blob/%s/%s", m.repo, m.branch, doc)
 			builder.WriteString(fmt.Sprintf("- [ ] [%s](%s)\n", docName, link))
 		}
 		builder.WriteString("\n")
@@ -134,7 +136,7 @@ func (m *IssueManager) OutputGitHubActions(result *CheckResult) {
 	fmt.Fprintf(f, "total_issues=%d\n", result.TotalIssues())
 	fmt.Fprintf(f, "missing_docs=%d\n", len(result.MissingDocs))
 	fmt.Fprintf(f, "missing_sections=%d\n", len(result.MissingSections))
-	fmt.Fprintf(f, "missing_details_sections=%d\n", len(result.MissingDetailsSections))
+	fmt.Fprintf(f, "missing_overview_sections=%d\n", len(result.MissingOverviewSections))
 	fmt.Fprintf(f, "orphaned_docs=%d\n", len(result.OrphanedDocs))
 
 	// For multiline output (issue body), use delimiter
@@ -169,6 +171,21 @@ func GetWorkflowURL() string {
 // GetRepository returns the repository from environment variables.
 func GetRepository() string {
 	return os.Getenv("GITHUB_REPOSITORY")
+}
+
+// GetBranch returns the current branch name from environment variables.
+// For pull requests, it uses GITHUB_HEAD_REF; otherwise GITHUB_REF_NAME.
+// Falls back to "main" if not running in GitHub Actions.
+func GetBranch() string {
+	// For pull requests, GITHUB_HEAD_REF contains the source branch
+	if headRef := os.Getenv("GITHUB_HEAD_REF"); headRef != "" {
+		return headRef
+	}
+	// For push events, GITHUB_REF_NAME contains the branch name
+	if refName := os.Getenv("GITHUB_REF_NAME"); refName != "" {
+		return refName
+	}
+	return "main"
 }
 
 // ghIssue represents a GitHub issue from gh CLI JSON output.

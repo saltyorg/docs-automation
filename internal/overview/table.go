@@ -1,4 +1,4 @@
-package details
+package overview
 
 import (
 	"bytes"
@@ -37,7 +37,7 @@ func (g *TableGenerator) LoadTemplate() error {
 		return fmt.Errorf("reading template: %w", err)
 	}
 
-	tmpl, err := template.New("details").Parse(string(content))
+	tmpl, err := template.New("overview").Parse(string(content))
 	if err != nil {
 		return fmt.Errorf("parsing template: %w", err)
 	}

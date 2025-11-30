@@ -39,7 +39,7 @@ type VariablesConfig struct {
 	HideInstanceToggle bool              `yaml:"hide_instance_toggle"`
 }
 
-// AppLink represents a project link for the details table.
+// AppLink represents a project link for the overview table.
 type AppLink struct {
 	Name string `yaml:"name"`
 	URL  string `yaml:"url"`

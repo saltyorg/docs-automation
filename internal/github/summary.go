@@ -180,10 +180,10 @@ func (s *UpdateSummary) WriteGitHubSummary() error {
 			sb.WriteString("\n</details>\n\n")
 		}
 
-		if len(s.CheckResult.MissingDetailsSections) > 0 {
-			sb.WriteString(fmt.Sprintf("**Missing Overview Sections:** %d docs\n", len(s.CheckResult.MissingDetailsSections)))
+		if len(s.CheckResult.MissingOverviewSections) > 0 {
+			sb.WriteString(fmt.Sprintf("**Missing Overview Sections:** %d docs\n", len(s.CheckResult.MissingOverviewSections)))
 			sb.WriteString("<details>\n<summary>Show docs</summary>\n\n")
-			for _, doc := range s.CheckResult.MissingDetailsSections {
+			for _, doc := range s.CheckResult.MissingOverviewSections {
 				sb.WriteString(fmt.Sprintf("- `%s`\n", doc))
 			}
 			sb.WriteString("\n</details>\n\n")

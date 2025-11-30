@@ -7,9 +7,9 @@ import (
 	"strings"
 
 	"github.com/saltyorg/docs-automation/internal/config"
-	"github.com/saltyorg/docs-automation/internal/details"
 	"github.com/saltyorg/docs-automation/internal/docs"
 	"github.com/saltyorg/docs-automation/internal/github"
+	"github.com/saltyorg/docs-automation/internal/overview"
 	"github.com/saltyorg/docs-automation/internal/parser"
 	"github.com/saltyorg/docs-automation/internal/template"
 	"github.com/spf13/cobra"
@@ -319,7 +319,7 @@ func updateRoleWithResult(cfg *config.Config, roleName, repoType string) github.
 
 	// Update overview section if enabled and the document has the section
 	if fmConfig.IsOverviewSectionEnabled() && manager.HasOverviewSection(doc) {
-		tableGen := details.NewTableGenerator(cfg.OverviewTemplatePath())
+		tableGen := overview.NewTableGenerator(cfg.OverviewTemplatePath())
 		if err := tableGen.LoadTemplate(); err != nil {
 			result.Status = github.StatusError
 			result.Error = fmt.Sprintf("loading overview template: %v", err)
@@ -548,7 +548,7 @@ func checkDocManagedSections(manager *docs.Manager, docPath, docsRoot string, re
 	}
 
 	if fmConfig.IsOverviewSectionEnabled() && !manager.HasOverviewSection(doc) {
-		result.MissingDetailsSections = append(result.MissingDetailsSections, relPath)
+		result.MissingOverviewSections = append(result.MissingOverviewSections, relPath)
 	}
 }
 
@@ -566,8 +566,8 @@ func printCoverageCheckResults(result *github.CheckResult) {
 		fmt.Printf("Missing Variables Sections: %d docs\n", len(result.MissingSections))
 	}
 
-	if len(result.MissingDetailsSections) > 0 {
-		fmt.Printf("Missing Overview Sections: %d docs\n", len(result.MissingDetailsSections))
+	if len(result.MissingOverviewSections) > 0 {
+		fmt.Printf("Missing Overview Sections: %d docs\n", len(result.MissingOverviewSections))
 	}
 
 	if len(result.OrphanedDocs) > 0 {

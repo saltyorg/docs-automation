@@ -37,11 +37,21 @@ func TypeComment(typ string) string {
 	}
 }
 
+// keywordOverrides maps specific types to their annotation keywords.
+// This allows compound types to display a simpler keyword in admonitions.
+var keywordOverrides = map[string]string{
+	DictOmit: Dict, // "dict/omit" -> "dict" in annotations
+}
+
 // Keyword extracts just the type keyword for use in annotations.
-// For example "bool (true/false)" -> "bool", "list" -> "list"
+// For example "bool (true/false)" -> "bool", "dict/omit" -> "dict"
 func Keyword(typ string) string {
 	if typ == "" {
 		return String
+	}
+	// Check for explicit overrides first
+	if keyword, ok := keywordOverrides[typ]; ok {
+		return keyword
 	}
 	// Take just the first word (before any space or parenthesis)
 	for i, ch := range typ {

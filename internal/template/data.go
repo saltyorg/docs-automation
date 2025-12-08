@@ -72,15 +72,14 @@ func (s *SectionData) HasSubsections() bool {
 
 // VariableData represents a variable for template rendering.
 type VariableData struct {
-	Name          string
-	RawValue      string
-	Type          string
-	Comment       string
-	CommentLines  []string
-	IsMultiline   bool
-	ValueLines    []string
-	InstanceName  string   // Instance-level variable name
-	InstanceLines []string // Instance-level value lines with adjusted indentation
+	Name         string
+	RawValue     string
+	Type         string
+	Comment      string
+	CommentLines []string
+	IsMultiline  bool
+	ValueLines   []string
+	InstanceName string // Instance-level variable name
 }
 
 // DockerInfo contains Docker+ variable information.
@@ -342,10 +341,6 @@ func buildVariableData(v *parser.Variable, roleName, instanceName string, typeIn
 	// Generate instance name
 	instName := parser.GenerateInstanceName(v.Name, roleName, instanceName)
 
-	// Instance lines use the same normalized value lines as role level
-	// The template function renderMultilineValue handles proper indentation
-	instLines := v.ValueLines
-
 	// Split comment into lines
 	var commentLines []string
 	if v.Comment != "" {
@@ -353,15 +348,14 @@ func buildVariableData(v *parser.Variable, roleName, instanceName string, typeIn
 	}
 
 	return &VariableData{
-		Name:          v.Name,
-		RawValue:      rawValue,
-		Type:          typ,
-		Comment:       v.Comment,
-		CommentLines:  commentLines,
-		IsMultiline:   v.IsMultiline,
-		ValueLines:    v.ValueLines,
-		InstanceName:  instName,
-		InstanceLines: instLines,
+		Name:         v.Name,
+		RawValue:     rawValue,
+		Type:         typ,
+		Comment:      v.Comment,
+		CommentLines: commentLines,
+		IsMultiline:  v.IsMultiline,
+		ValueLines:   v.ValueLines,
+		InstanceName: instName,
 	}
 }
 

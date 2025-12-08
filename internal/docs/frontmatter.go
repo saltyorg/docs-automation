@@ -17,10 +17,9 @@ type Frontmatter struct {
 type SaltboxAutomationConfig struct {
 	Disabled           bool                `yaml:"disabled"`
 	Sections           SectionsConfig      `yaml:"sections"`
-	Variables          VariablesConfig     `yaml:"variables"`
+	Inventory          InventoryConfig     `yaml:"inventory"`
 	AppLinks           []AppLink           `yaml:"app_links"`
 	ProjectDescription *ProjectDescription `yaml:"project_description"`
-	Subproject         *Subproject         `yaml:"subproject"`
 }
 
 // SectionsConfig controls which automated sections to include.
@@ -29,21 +28,18 @@ type SectionsConfig struct {
 	Overview  *bool `yaml:"overview"`
 }
 
-// VariablesConfig controls the variables section generation.
-type VariablesConfig struct {
-	ShowSections       []string          `yaml:"show_sections"`
-	HideSections       []string          `yaml:"hide_sections"`
-	ExampleOverrides   map[string]string `yaml:"example_overrides"`
-	Intro              string            `yaml:"intro"`
-	HideDefaultWarning bool              `yaml:"hide_default_warning"`
-	HideInstanceToggle bool              `yaml:"hide_instance_toggle"`
+// InventoryConfig controls the inventory section generation.
+type InventoryConfig struct {
+	ShowSections     []string          `yaml:"show_sections"`
+	HideSections     []string          `yaml:"hide_sections"`
+	ExampleOverrides map[string]string `yaml:"example_overrides"`
 }
 
 // AppLink represents a project link for the overview table.
 type AppLink struct {
 	Name string `yaml:"name"`
 	URL  string `yaml:"url"`
-	Icon string `yaml:"icon,omitempty"`
+	Type string `yaml:"type,omitempty"`
 }
 
 // ProjectDescription contains project metadata.
@@ -52,13 +48,6 @@ type ProjectDescription struct {
 	Summary    string   `yaml:"summary"`
 	Link       string   `yaml:"link"`
 	Categories []string `yaml:"categories"`
-}
-
-// Subproject contains subproject/companion app information.
-type Subproject struct {
-	Name    string `yaml:"name"`
-	Summary string `yaml:"summary"`
-	Link    string `yaml:"link"`
 }
 
 // ParseFrontmatter extracts and parses the YAML frontmatter from markdown content.
@@ -128,15 +117,15 @@ func (c *SaltboxAutomationConfig) ShouldShowSection(sectionName string) bool {
 	}
 
 	// Check hide list first
-	for _, s := range c.Variables.HideSections {
+	for _, s := range c.Inventory.HideSections {
 		if strings.EqualFold(s, sectionName) {
 			return false
 		}
 	}
 
 	// If show list is specified, only show those
-	if len(c.Variables.ShowSections) > 0 {
-		for _, s := range c.Variables.ShowSections {
+	if len(c.Inventory.ShowSections) > 0 {
+		for _, s := range c.Inventory.ShowSections {
 			if strings.EqualFold(s, sectionName) {
 				return true
 			}
@@ -149,17 +138,9 @@ func (c *SaltboxAutomationConfig) ShouldShowSection(sectionName string) bool {
 
 // GetExampleOverride returns the example override for a variable, if any.
 func (c *SaltboxAutomationConfig) GetExampleOverride(varName string) (string, bool) {
-	if c == nil || c.Variables.ExampleOverrides == nil {
+	if c == nil || c.Inventory.ExampleOverrides == nil {
 		return "", false
 	}
-	val, ok := c.Variables.ExampleOverrides[varName]
+	val, ok := c.Inventory.ExampleOverrides[varName]
 	return val, ok
-}
-
-// GetIntro returns the custom intro text, or empty string if not set.
-func (c *SaltboxAutomationConfig) GetIntro() string {
-	if c == nil {
-		return ""
-	}
-	return c.Variables.Intro
 }

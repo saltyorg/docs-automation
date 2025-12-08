@@ -94,11 +94,11 @@ func generateRole(cfg *config.Config, roleName string) error {
 
 	// Create template engine and render
 	engine := template.New()
-	if err := engine.LoadRoleTemplate(cfg.RoleVariablesTemplatePath()); err != nil {
+	if err := engine.LoadFile("inventory", cfg.InventoryTemplatePath()); err != nil {
 		return fmt.Errorf("loading template: %w", err)
 	}
 
-	output, err := engine.Render("role", data)
+	output, err := engine.Render("inventory", data)
 	if err != nil {
 		return fmt.Errorf("rendering template: %w", err)
 	}
@@ -210,11 +210,11 @@ func generateRoleWithType(cfg *config.Config, roleName, repoType string) error {
 
 	// Create template engine and render
 	engine := template.New()
-	if err := engine.LoadRoleTemplate(cfg.RoleVariablesTemplatePath()); err != nil {
+	if err := engine.LoadFile("inventory", cfg.InventoryTemplatePath()); err != nil {
 		return fmt.Errorf("loading template: %w", err)
 	}
 
-	output, err := engine.Render("role", data)
+	output, err := engine.Render("inventory", data)
 	if err != nil {
 		return fmt.Errorf("rendering: %w", err)
 	}

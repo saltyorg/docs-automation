@@ -104,21 +104,9 @@ func scaffoldRole(cfg *config.Config, roleName string) error {
 		templatePath = cfg.ScaffoldTemplatePath()
 	}
 
-	var tmpl *template.Template
-	var err error
-
-	// Check if template file exists, otherwise use default
-	if _, err = os.Stat(templatePath); os.IsNotExist(err) {
-		// Use built-in default template
-		tmpl, err = template.New("scaffold").Parse(defaultScaffoldTemplate())
-		if err != nil {
-			return fmt.Errorf("parsing default template: %w", err)
-		}
-	} else {
-		tmpl, err = template.ParseFiles(templatePath)
-		if err != nil {
-			return fmt.Errorf("parsing template file: %w", err)
-		}
+	tmpl, err := template.ParseFiles(templatePath)
+	if err != nil {
+		return fmt.Errorf("loading template %s: %w", templatePath, err)
 	}
 
 	// Ensure output directory exists
@@ -140,35 +128,4 @@ func scaffoldRole(cfg *config.Config, roleName string) error {
 
 	fmt.Printf("Created %s\n", outputPath)
 	return nil
-}
-
-// defaultScaffoldTemplate returns the built-in scaffold template.
-func defaultScaffoldTemplate() string {
-	return `---
-saltbox_automation:
-  app_links:
-    - name: Project home
-      url: "https://{{.RoleName}}.com"
-      icon: ":material-home:"
-  project_description:
-    name: "{{.RoleTitle}}"
-    summary: "TODO: Add description"
-    link: "https://{{.RoleName}}.com"
----
-
-# {{.RoleTitle}}
-
-## Overview
-
-TODO: Add overview
-
-## Deployment
-
-` + "```shell" + `
-sb install {{.TagPrefix}}{{.RoleTag}}
-` + "```" + `
-
-<!-- BEGIN SALTBOX MANAGED VARIABLES SECTION -->
-<!-- END SALTBOX MANAGED VARIABLES SECTION -->
-`
 }

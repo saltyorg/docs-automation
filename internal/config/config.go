@@ -189,9 +189,9 @@ func (c *Config) SandboxDocsPath() string {
 	return filepath.Join(c.Repositories.Docs, "docs", "sandbox", "apps")
 }
 
-// RoleVariablesTemplatePath returns the path to the role variables template.
-func (c *Config) RoleVariablesTemplatePath() string {
-	return filepath.Join(c.Repositories.Docs, "templates", "role_variables.md.tmpl")
+// InventoryTemplatePath returns the path to the inventory template.
+func (c *Config) InventoryTemplatePath() string {
+	return filepath.Join(c.Repositories.Docs, "templates", "inventory.md.tmpl")
 }
 
 // OverviewTemplatePath returns the path to the overview template.

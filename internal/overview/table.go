@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"os"
-	"strings"
 	"text/template"
 
 	"github.com/saltyorg/docs-automation/internal/docs"
@@ -18,8 +17,13 @@ type TableGenerator struct {
 
 // TableData holds data for the overview table template.
 type TableData struct {
-	Rows [][]string // Each row contains up to 3 formatted link cells
+	Description *docs.ProjectDescription // Project description
+	Links       []docs.AppLink           // All links passed to template
 }
+
+// templateFuncs provides helper functions for templates.
+// The icon mapping is defined in the template file itself.
+var templateFuncs = template.FuncMap{}
 
 // NewTableGenerator creates a new overview table generator.
 func NewTableGenerator(templatePath string) *TableGenerator {
@@ -37,7 +41,7 @@ func (g *TableGenerator) LoadTemplate() error {
 		return fmt.Errorf("reading template: %w", err)
 	}
 
-	tmpl, err := template.New("overview").Parse(string(content))
+	tmpl, err := template.New("overview").Funcs(templateFuncs).Parse(string(content))
 	if err != nil {
 		return fmt.Errorf("parsing template: %w", err)
 	}
@@ -62,23 +66,10 @@ func (g *TableGenerator) Generate(automation *docs.SaltboxAutomationConfig) (str
 		return "", fmt.Errorf("template not loaded")
 	}
 
-	// Build rows of formatted links (3 per row)
-	links := automation.AppLinks
-	var rows [][]string
-
-	for i := 0; i < len(links); i += 3 {
-		row := make([]string, 3)
-		for j := range 3 {
-			if i+j < len(links) {
-				row[j] = formatLink(links[i+j])
-			} else {
-				row[j] = ""
-			}
-		}
-		rows = append(rows, row)
+	data := TableData{
+		Description: automation.ProjectDescription,
+		Links:       automation.AppLinks,
 	}
-
-	data := TableData{Rows: rows}
 
 	var buf bytes.Buffer
 	if err := g.tmpl.Execute(&buf, data); err != nil {
@@ -86,26 +77,6 @@ func (g *TableGenerator) Generate(automation *docs.SaltboxAutomationConfig) (str
 	}
 
 	return buf.String(), nil
-}
-
-// formatLink formats a single app link for the table.
-func formatLink(link docs.AppLink) string {
-	var builder strings.Builder
-
-	builder.WriteString("[")
-
-	// Add icon if present
-	if link.Icon != "" {
-		builder.WriteString(link.Icon)
-		builder.WriteString(" ")
-	}
-
-	builder.WriteString(link.Name)
-	builder.WriteString("](")
-	builder.WriteString(link.URL)
-	builder.WriteString("){: .header-icons }")
-
-	return builder.String()
 }
 
 // GenerateFromDocument generates an overview table for a document.

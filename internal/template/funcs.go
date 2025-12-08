@@ -6,36 +6,17 @@ import (
 
 	"github.com/saltyorg/docs-automation/internal/parser"
 	"github.com/saltyorg/docs-automation/internal/types"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 )
 
 // FuncMap returns the template function map.
 func FuncMap() template.FuncMap {
-	titleCaser := cases.Title(language.English)
 	return template.FuncMap{
-		// String functions
-		"lower":     strings.ToLower,
-		"upper":     strings.ToUpper,
-		"title":     titleCaser.String,
-		"trimSpace": strings.TrimSpace,
-		"contains":  strings.Contains,
-		"hasPrefix": strings.HasPrefix,
-		"hasSuffix": strings.HasSuffix,
-		"replace":   strings.ReplaceAll,
-		"join":      strings.Join,
-		"split":     strings.Split,
-
 		// Formatting functions
-		"indent":             indent,
-		"formatTypeComment":  formatTypeComment,
-		"formatDefaultValue": formatDefaultValue,
-		"typeKeyword":        typeKeyword,
+		"indent":            indent,
+		"formatTypeComment": formatTypeComment,
+		"typeKeyword":       typeKeyword,
 
 		// Role variable functions
-		"adjustMultilineIndent":        adjustMultilineIndent,
-		"generateInstanceName":         generateInstanceName,
-		"renderMultilineValue":         renderMultilineValue,
 		"renderMultilineValueAdjusted": renderMultilineValueAdjusted,
 		"getValueLines":                getValueLines,
 
@@ -48,7 +29,6 @@ func FuncMap() template.FuncMap {
 		"replaceRole":           replaceRole,
 		"replacePlural":         replacePlural,
 		"formatOverrideDefault": formatOverrideDefault,
-		"hasOverrideDefault":    hasOverrideDefault,
 	}
 }
 
@@ -62,15 +42,6 @@ func indent(n int, s string) string {
 		}
 	}
 	return strings.Join(lines, "\n")
-}
-
-// renderMultilineValue renders just the first line of a multiline value.
-// Continuation lines should be rendered separately in the template with proper indentation.
-func renderMultilineValue(varName string, valueLines []string) string {
-	if len(valueLines) == 0 {
-		return ""
-	}
-	return valueLines[0]
 }
 
 // getValueLines returns the continuation lines (all lines after the first) for template iteration.
@@ -150,72 +121,6 @@ func typeKeyword(typ string) string {
 	return types.Keyword(typ)
 }
 
-// formatDefaultValue formats a default value for display.
-func formatDefaultValue(value, typ string) string {
-	if value == "" || value == "null" {
-		return "# No default"
-	}
-
-	// For bools, show the actual value
-	if typ == "bool" {
-		return value
-	}
-
-	return value
-}
-
-// adjustMultilineIndent adjusts the indentation of continuation lines.
-func adjustMultilineIndent(lines []string, originalName, newName string) []string {
-	if len(lines) <= 1 {
-		return lines
-	}
-
-	diff := len(newName) - len(originalName)
-	result := make([]string, len(lines))
-	result[0] = strings.Replace(lines[0], originalName, newName, 1)
-
-	for i := 1; i < len(lines); i++ {
-		line := lines[i]
-		if diff == 0 {
-			result[i] = line
-			continue
-		}
-
-		trimmed := strings.TrimLeft(line, " \t")
-		if trimmed == "" {
-			result[i] = line
-			continue
-		}
-
-		currentIndent := len(line) - len(trimmed)
-		newIndent := max(currentIndent+diff, 0)
-
-		result[i] = strings.Repeat(" ", newIndent) + trimmed
-	}
-
-	return result
-}
-
-// generateInstanceName converts a role-level variable name to instance-level.
-func generateInstanceName(varName, roleName, instanceName string) string {
-	rolePrefix := roleName + "_role_"
-	if after, ok := strings.CutPrefix(varName, rolePrefix); ok {
-		suffix := after
-		return instanceName + "_" + suffix
-	}
-
-	roleSimplePrefix := roleName + "_"
-	if after, ok := strings.CutPrefix(varName, roleSimplePrefix); ok {
-		suffix := after
-		if suffix == "instances" {
-			return varName
-		}
-		return instanceName + "_" + suffix
-	}
-
-	return varName
-}
-
 // replaceVariable replaces {variable} placeholder with the actual variable name.
 func replaceVariable(varName, text string) string {
 	return strings.ReplaceAll(text, "{variable}", varName)
@@ -229,14 +134,6 @@ func replaceRole(roleName, text string) string {
 // replacePlural replaces "containers" with "the container" for non-instance roles.
 func replacePlural(text string) string {
 	return strings.ReplaceAll(text, "containers", "the container")
-}
-
-// hasOverrideDefault returns true if the override variable has a default value to display.
-// This handles the case where default is explicitly set (even to empty string "").
-func hasOverrideDefault(defaultVal string, hasDefault bool) bool {
-	// If we have a non-empty default, show it
-	// The hasDefault flag indicates whether a default was explicitly set in config
-	return defaultVal != "" || hasDefault
 }
 
 // formatOverrideDefault formats a default value for display in Global Override Options.

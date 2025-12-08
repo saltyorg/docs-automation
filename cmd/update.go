@@ -295,13 +295,13 @@ func updateRoleWithResult(cfg *config.Config, roleName, repoType string) github.
 
 		// Create template engine and render
 		engine := template.New()
-		if err := engine.LoadRoleTemplate(cfg.RoleVariablesTemplatePath()); err != nil {
+		if err := engine.LoadFile("inventory", cfg.InventoryTemplatePath()); err != nil {
 			result.Status = github.StatusError
 			result.Error = fmt.Sprintf("loading template: %v", err)
 			return result
 		}
 
-		output, err := engine.Render("role", data)
+		output, err := engine.Render("inventory", data)
 		if err != nil {
 			result.Status = github.StatusError
 			result.Error = fmt.Sprintf("rendering: %v", err)

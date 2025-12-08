@@ -63,24 +63,7 @@ Each app link has the following structure:
 
 #### Link Types
 
-The `type` field maps to icons defined in the template (`templates/overview.md.tmpl`):
-
-| Type | Icon | Description |
-|------|------|-------------|
-| `manual` | `:material-bookshelf:` | Manual/documentation |
-| `docs` | `:material-bookshelf:` | Documentation |
-| `home` | `:material-home:` | Project home page |
-| `releases` | `:fontawesome-solid-newspaper:` | Generic releases |
-| `releases-docker` | `:fontawesome-brands-docker:` | Docker Hub releases |
-| `releases-github` | `:fontawesome-brands-github:` | GitHub container registry |
-| `releases-gcloud` | `:simple-googlecloud:` | Google Cloud releases |
-| `community` | `:fontawesome-solid-people-group:` | Generic community forums |
-| `community-discord` | `:fontawesome-brands-discord:` | Discord server |
-| `community-slack` | `:fontawesome-brands-slack:` | Slack workspace |
-| `community-plex` | `:material-plex:` | Plex forums |
-| `discord` | `:fontawesome-brands-discord:` | Discord (shorthand) |
-| `github` | `:fontawesome-brands-github:` | GitHub (shorthand) |
-| `docker` | `:fontawesome-brands-docker:` | Docker (shorthand) |
+The `type` field maps to icons defined in the docs repo template (`templates/overview.md.tmpl`):
 
 ### Project Description
 

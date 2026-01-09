@@ -71,16 +71,16 @@ func init() {
 
 // updateRole updates documentation for a single role.
 func updateRole(cfg *config.Config, roleName string) error {
-	// Try to find the role in saltbox first, then sandbox
-	defaultsPath := filepath.Join(cfg.SaltboxRolesPath(), roleName, "defaults", "main.yml")
+	// Try to find the role directory in saltbox first, then sandbox.
 	repoType := "saltbox"
+	rolePath := filepath.Join(cfg.SaltboxRolesPath(), roleName)
 
-	if _, err := os.Stat(defaultsPath); os.IsNotExist(err) {
+	if info, err := os.Stat(rolePath); err != nil || !info.IsDir() {
 		// Try sandbox
-		defaultsPath = filepath.Join(cfg.SandboxRolesPath(), roleName, "defaults", "main.yml")
+		rolePath = filepath.Join(cfg.SandboxRolesPath(), roleName)
 		repoType = "sandbox"
 
-		if _, err := os.Stat(defaultsPath); os.IsNotExist(err) {
+		if info, err := os.Stat(rolePath); err != nil || !info.IsDir() {
 			return fmt.Errorf("role %q not found in saltbox or sandbox", roleName)
 		}
 	}
@@ -218,30 +218,6 @@ func updateRoleWithResult(cfg *config.Config, roleName, repoType string) github.
 
 	defaultsPath := filepath.Join(rolesPath, roleName, "defaults", "main.yml")
 
-	// Check if defaults file exists
-	if _, err := os.Stat(defaultsPath); os.IsNotExist(err) {
-		result.Status = github.StatusSkipped
-		result.SkipReason = "no defaults/main.yml"
-		return result
-	}
-
-	// Parse the role
-	p := parser.New(roleName, repoType)
-	roleInfo, err := p.ParseFile(defaultsPath)
-	if err != nil {
-		result.Status = github.StatusError
-		result.Error = fmt.Sprintf("parsing: %v", err)
-		return result
-	}
-
-	// Skip if no variables (use filtered count for this check)
-	filteredVars := parser.FilterVariables(roleInfo.AllVariables, roleName)
-	if len(filteredVars) == 0 {
-		result.Status = github.StatusSkipped
-		result.SkipReason = "no documentable variables"
-		return result
-	}
-
 	// Get documentation path
 	docPath := getDocPath(cfg, roleName, repoType)
 	if docPath == "" {
@@ -288,33 +264,54 @@ func updateRoleWithResult(cfg *config.Config, roleName, repoType string) github.
 		fmConfig = doc.Frontmatter.SaltboxAutomation
 	}
 
+	inventorySkipReason := ""
+
 	// Update inventory section if enabled
 	if fmConfig.IsInventorySectionEnabled() && manager.HasVariablesSection(doc) {
-		// Build template data
-		data := template.BuildRoleData(roleInfo, cfg, fmConfig)
+		if _, err := os.Stat(defaultsPath); os.IsNotExist(err) {
+			inventorySkipReason = "no defaults/main.yml"
+		} else {
+			// Parse the role
+			p := parser.New(roleName, repoType)
+			roleInfo, err := p.ParseFile(defaultsPath)
+			if err != nil {
+				result.Status = github.StatusError
+				result.Error = fmt.Sprintf("parsing: %v", err)
+				return result
+			}
 
-		// Create template engine and render
-		engine := template.New()
-		if err := engine.LoadFile("inventory", cfg.InventoryTemplatePath()); err != nil {
-			result.Status = github.StatusError
-			result.Error = fmt.Sprintf("loading template: %v", err)
-			return result
-		}
+			// Skip if no variables (use filtered count for this check)
+			filteredVars := parser.FilterVariables(roleInfo.AllVariables, roleName)
+			if len(filteredVars) == 0 {
+				inventorySkipReason = "no documentable variables"
+			} else {
+				// Build template data
+				data := template.BuildRoleData(roleInfo, cfg, fmConfig)
 
-		output, err := engine.Render("inventory", data)
-		if err != nil {
-			result.Status = github.StatusError
-			result.Error = fmt.Sprintf("rendering: %v", err)
-			return result
-		}
+				// Create template engine and render
+				engine := template.New()
+				if err := engine.LoadFile("inventory", cfg.InventoryTemplatePath()); err != nil {
+					result.Status = github.StatusError
+					result.Error = fmt.Sprintf("loading template: %v", err)
+					return result
+				}
 
-		// Update the managed section
-		if err := manager.UpdateVariablesSection(doc, output); err != nil {
-			result.Status = github.StatusError
-			result.Error = fmt.Sprintf("updating section: %v", err)
-			return result
+				output, err := engine.Render("inventory", data)
+				if err != nil {
+					result.Status = github.StatusError
+					result.Error = fmt.Sprintf("rendering: %v", err)
+					return result
+				}
+
+				// Update the managed section
+				if err := manager.UpdateVariablesSection(doc, output); err != nil {
+					result.Status = github.StatusError
+					result.Error = fmt.Sprintf("updating section: %v", err)
+					return result
+				}
+				result.Sections = append(result.Sections, "variables")
+			}
 		}
-		result.Sections = append(result.Sections, "variables")
 	}
 
 	// Update overview section if enabled and the document has the section
@@ -344,7 +341,11 @@ func updateRoleWithResult(cfg *config.Config, roleName, repoType string) github.
 	// Skip if nothing was updated
 	if len(result.Sections) == 0 {
 		result.Status = github.StatusSkipped
-		result.SkipReason = "no enabled sections to update"
+		if inventorySkipReason != "" {
+			result.SkipReason = inventorySkipReason
+		} else {
+			result.SkipReason = "no enabled sections to update"
+		}
 		return result
 	}
 
@@ -489,10 +490,14 @@ func runCoverageChecks(cfg *config.Config) (*github.CheckResult, error) {
 			continue
 		}
 		defaultsPath := filepath.Join(cfg.SaltboxRolesPath(), roleName, "defaults", "main.yml")
-		if _, err := os.Stat(defaultsPath); os.IsNotExist(err) {
-			continue
+		hasDefaults := true
+		if _, err := os.Stat(defaultsPath); err != nil {
+			if !os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "Warning: failed to stat %s: %v\n", defaultsPath, err)
+			}
+			hasDefaults = false
 		}
-		checkDocManagedSections(manager, docPath, cfg.Repositories.Docs, result)
+		checkDocManagedSections(manager, docPath, cfg.Repositories.Docs, result, hasDefaults)
 	}
 
 	// Check sandbox docs
@@ -502,10 +507,14 @@ func runCoverageChecks(cfg *config.Config) (*github.CheckResult, error) {
 			continue
 		}
 		defaultsPath := filepath.Join(cfg.SandboxRolesPath(), roleName, "defaults", "main.yml")
-		if _, err := os.Stat(defaultsPath); os.IsNotExist(err) {
-			continue
+		hasDefaults := true
+		if _, err := os.Stat(defaultsPath); err != nil {
+			if !os.IsNotExist(err) {
+				fmt.Fprintf(os.Stderr, "Warning: failed to stat %s: %v\n", defaultsPath, err)
+			}
+			hasDefaults = false
 		}
-		checkDocManagedSections(manager, docPath, cfg.Repositories.Docs, result)
+		checkDocManagedSections(manager, docPath, cfg.Repositories.Docs, result, hasDefaults)
 	}
 
 	return result, nil
@@ -525,7 +534,7 @@ func roleHasDocCheck(cfg *config.Config, roleName, repoType string, docMap map[s
 }
 
 // checkDocManagedSections checks if a doc has the managed sections.
-func checkDocManagedSections(manager *docs.Manager, docPath, docsRoot string, result *github.CheckResult) {
+func checkDocManagedSections(manager *docs.Manager, docPath, docsRoot string, result *github.CheckResult, hasDefaults bool) {
 	doc, err := manager.LoadDocument(docPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to load %s: %v\n", docPath, err)
@@ -543,7 +552,7 @@ func checkDocManagedSections(manager *docs.Manager, docPath, docsRoot string, re
 
 	relPath, _ := filepath.Rel(docsRoot, docPath)
 
-	if fmConfig.IsInventorySectionEnabled() && !manager.HasVariablesSection(doc) {
+	if hasDefaults && fmConfig.IsInventorySectionEnabled() && !manager.HasVariablesSection(doc) {
 		result.MissingSections = append(result.MissingSections, relPath)
 	}
 

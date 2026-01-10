@@ -73,6 +73,16 @@ func (p *Parser) ParseFile(path string) (*RoleInfo, error) {
 	}
 
 	// Second pass: parse with lookahead capability
+	// Skip any header before the YAML document start marker.
+	startLine := 0
+	for i, line := range lines {
+		if strings.TrimSpace(line) == "---" {
+			startLine = i + 1
+			break
+		}
+	}
+
+	lineNum = startLine
 	for lineNum < len(lines) {
 		line := lines[lineNum]
 		lineNum++

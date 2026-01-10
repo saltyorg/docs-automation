@@ -134,54 +134,65 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *docs.Sal
 	}
 
 	// Process sections
-	for _, sectionName := range role.SectionOrder {
-		section := role.Sections[sectionName]
-		if section == nil {
-			continue
-		}
-
-		// Check if section should be shown
-		if fmConfig != nil && !fmConfig.ShouldShowSection(sectionName) {
-			continue
-		}
-
-		sectionData := &SectionData{
-			Name:            sectionName,
-			Variables:       make([]*VariableData, 0),
-			Subsections:     make(map[string][]*VariableData),
-			SubsectionOrder: section.SubsectionOrder,
-		}
-
-		// Process section variables
-		for _, v := range section.Variables {
-			// Skip base variables that have _default/_custom variants
-			if hideBase[v.Name] {
-				continue
+	if len(role.SectionOrder) == 0 {
+		sectionName := "General"
+		if fmConfig == nil || fmConfig.ShouldShowSection(sectionName) {
+			sectionData := &SectionData{
+				Name:            sectionName,
+				Variables:       make([]*VariableData, 0),
+				Subsections:     make(map[string][]*VariableData),
+				SubsectionOrder: []string{},
 			}
-			varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, fmConfig)
-			sectionData.Variables = append(sectionData.Variables, varData)
 
-			// Collect role_var lookups (will be enriched later with config data)
-			for _, suffix := range parser.ExtractRoleVarLookups(v.RawValue) {
-				if _, exists := data.RoleVarLookups[suffix]; !exists {
-					data.RoleVarLookups[suffix] = &GlobalOverrideVar{
-						Suffix: suffix,
-						Type:   parser.InferRoleVarType(suffix, v.RawValue),
+			for _, v := range role.AllVariables {
+				if hideBase[v.Name] {
+					continue
+				}
+				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, fmConfig)
+				sectionData.Variables = append(sectionData.Variables, varData)
+
+				for _, suffix := range parser.ExtractRoleVarLookups(v.RawValue) {
+					if _, exists := data.RoleVarLookups[suffix]; !exists {
+						data.RoleVarLookups[suffix] = &GlobalOverrideVar{
+							Suffix: suffix,
+							Type:   parser.InferRoleVarType(suffix, v.RawValue),
+						}
 					}
 				}
 			}
-		}
 
-		// Process subsections
-		for _, subName := range section.SubsectionOrder {
-			vars := section.Subsections[subName]
-			for _, v := range vars {
+			if len(sectionData.Variables) > 0 {
+				data.Sections[sectionName] = sectionData
+				data.SectionOrder = []string{sectionName}
+			}
+		}
+	} else {
+		for _, sectionName := range role.SectionOrder {
+			section := role.Sections[sectionName]
+			if section == nil {
+				continue
+			}
+
+			// Check if section should be shown
+			if fmConfig != nil && !fmConfig.ShouldShowSection(sectionName) {
+				continue
+			}
+
+			sectionData := &SectionData{
+				Name:            sectionName,
+				Variables:       make([]*VariableData, 0),
+				Subsections:     make(map[string][]*VariableData),
+				SubsectionOrder: section.SubsectionOrder,
+			}
+
+			// Process section variables
+			for _, v := range section.Variables {
 				// Skip base variables that have _default/_custom variants
 				if hideBase[v.Name] {
 					continue
 				}
 				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, fmConfig)
-				sectionData.Subsections[subName] = append(sectionData.Subsections[subName], varData)
+				sectionData.Variables = append(sectionData.Variables, varData)
 
 				// Collect role_var lookups (will be enriched later with config data)
 				for _, suffix := range parser.ExtractRoleVarLookups(v.RawValue) {
@@ -193,9 +204,32 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *docs.Sal
 					}
 				}
 			}
-		}
 
-		data.Sections[sectionName] = sectionData
+			// Process subsections
+			for _, subName := range section.SubsectionOrder {
+				vars := section.Subsections[subName]
+				for _, v := range vars {
+					// Skip base variables that have _default/_custom variants
+					if hideBase[v.Name] {
+						continue
+					}
+					varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, fmConfig)
+					sectionData.Subsections[subName] = append(sectionData.Subsections[subName], varData)
+
+					// Collect role_var lookups (will be enriched later with config data)
+					for _, suffix := range parser.ExtractRoleVarLookups(v.RawValue) {
+						if _, exists := data.RoleVarLookups[suffix]; !exists {
+							data.RoleVarLookups[suffix] = &GlobalOverrideVar{
+								Suffix: suffix,
+								Type:   parser.InferRoleVarType(suffix, v.RawValue),
+							}
+						}
+					}
+				}
+			}
+
+			data.Sections[sectionName] = sectionData
+		}
 	}
 
 	// Build DockerInfo if the role has docker variables

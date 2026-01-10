@@ -156,6 +156,13 @@ func updateAllRoles(cfg *config.Config) error {
 		}
 	}
 
+	// Update frontmatter-only docs (overview sections only)
+	if updated, err := updateFrontmatterDocs(cfg); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to update frontmatter docs: %v\n", err)
+	} else if updated > 0 {
+		fmt.Printf("Updated %d frontmatter doc(s)\n", updated)
+	}
+
 	// Run coverage checks if requested
 	if updateRunCheck {
 		checkResult, err := runCoverageChecks(cfg)
@@ -369,6 +376,91 @@ func updateRoleWithResult(cfg *config.Config, roleName, repoType string) github.
 	return result
 }
 
+// updateFrontmatterDocs updates overview sections for docs listed in config.
+// Returns the number of documents updated.
+func updateFrontmatterDocs(cfg *config.Config) (int, error) {
+	if len(cfg.FrontmatterDocs) == 0 {
+		return 0, nil
+	}
+
+	manager := docs.NewManager(docs.MarkerConfig{
+		Variables: cfg.Markers.Variables,
+		CLI:       cfg.Markers.CLI,
+		Overview:  cfg.Markers.Overview,
+	})
+
+	tableGen := overview.NewTableGenerator(cfg.OverviewTemplatePath())
+	if err := tableGen.LoadTemplate(); err != nil {
+		return 0, err
+	}
+
+	updated := 0
+	seen := make(map[string]bool)
+
+	for _, relPath := range cfg.FrontmatterDocs {
+		trimmed := strings.TrimSpace(relPath)
+		if trimmed == "" {
+			continue
+		}
+
+		docPath := filepath.Join(cfg.Repositories.Docs, trimmed)
+		if seen[docPath] {
+			continue
+		}
+		seen[docPath] = true
+
+		doc, err := manager.LoadDocument(docPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to load %s: %v\n", docPath, err)
+			continue
+		}
+
+		if manager.IsAutomationDisabled(doc) {
+			continue
+		}
+
+		if doc.Frontmatter == nil || doc.Frontmatter.SaltboxAutomation == nil {
+			continue
+		}
+
+		fmConfig := doc.Frontmatter.SaltboxAutomation
+		if !fmConfig.IsOverviewSectionEnabled() || !manager.HasOverviewSection(doc) {
+			continue
+		}
+
+		tableContent, err := tableGen.GenerateFromDocument(doc)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to generate overview for %s: %v\n", docPath, err)
+			continue
+		}
+		if tableContent == "" {
+			continue
+		}
+
+		originalContent := doc.Content
+		if err := manager.UpdateOverviewSection(doc, tableContent); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to update overview section in %s: %v\n", docPath, err)
+			continue
+		}
+
+		if doc.Content == originalContent {
+			continue
+		}
+
+		if err := manager.SaveDocument(doc); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to save %s: %v\n", docPath, err)
+			continue
+		}
+
+		updated++
+		if IsVerbose() {
+			fmt.Fprintf(os.Stderr, "  Updated %s\n", docPath)
+		}
+	}
+
+	return updated, nil
+}
+
 // runCoverageChecks performs coverage checks and returns the results.
 func runCoverageChecks(cfg *config.Config) (*github.CheckResult, error) {
 	result := &github.CheckResult{}
@@ -482,9 +574,11 @@ func runCoverageChecks(cfg *config.Config) (*github.CheckResult, error) {
 		CLI:       cfg.Markers.CLI,
 		Overview:  cfg.Markers.Overview,
 	})
+	checkedDocs := make(map[string]bool)
 
 	// Check saltbox docs
 	for _, docPath := range saltboxDocs {
+		checkedDocs[docPath] = true
 		roleName := docs.ExtractRoleName(docPath)
 		if saltboxBlacklist[roleName] {
 			continue
@@ -502,6 +596,7 @@ func runCoverageChecks(cfg *config.Config) (*github.CheckResult, error) {
 
 	// Check sandbox docs
 	for _, docPath := range sandboxDocs {
+		checkedDocs[docPath] = true
 		roleName := docs.ExtractRoleName(docPath)
 		if sandboxBlacklist[roleName] {
 			continue
@@ -515,6 +610,19 @@ func runCoverageChecks(cfg *config.Config) (*github.CheckResult, error) {
 			hasDefaults = false
 		}
 		checkDocManagedSections(manager, docPath, cfg.Repositories.Docs, result, hasDefaults)
+	}
+
+	// Check frontmatter-only docs (overview sections only)
+	for _, relPath := range cfg.FrontmatterDocs {
+		trimmed := strings.TrimSpace(relPath)
+		if trimmed == "" {
+			continue
+		}
+		docPath := filepath.Join(cfg.Repositories.Docs, trimmed)
+		if checkedDocs[docPath] {
+			continue
+		}
+		checkDocManagedSections(manager, docPath, cfg.Repositories.Docs, result, false)
 	}
 
 	return result, nil

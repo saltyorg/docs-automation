@@ -17,7 +17,6 @@ type Config struct {
 	TypeInference   TypeInferenceConfig          `yaml:"type_inference"`
 	DockerVariables DockerVariables              `yaml:"docker_variables"`
 	CLIHelp         CLIHelpConfig                `yaml:"cli_help"`
-	FrontmatterDocs []string                     `yaml:"frontmatter_docs"`
 	Markers         MarkersConfig                `yaml:"markers"`
 	Scaffold        ScaffoldConfig               `yaml:"scaffold"`
 }

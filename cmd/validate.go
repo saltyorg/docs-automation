@@ -3,8 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/saltyorg/docs-automation/internal/config"
 	"github.com/saltyorg/docs-automation/internal/docs"
@@ -66,7 +64,7 @@ func validateFrontmatter(cfg *config.Config) error {
 		return fmt.Errorf("listing sandbox docs: %w", err)
 	}
 
-	allDocs := make([]string, 0, len(saltboxDocs)+len(sandboxDocs)+len(cfg.FrontmatterDocs))
+	allDocs := make([]string, 0, len(saltboxDocs)+len(sandboxDocs))
 	seen := make(map[string]bool)
 
 	for _, docPath := range saltboxDocs {
@@ -78,19 +76,6 @@ func validateFrontmatter(cfg *config.Config) error {
 	}
 
 	for _, docPath := range sandboxDocs {
-		if seen[docPath] {
-			continue
-		}
-		seen[docPath] = true
-		allDocs = append(allDocs, docPath)
-	}
-
-	for _, relPath := range cfg.FrontmatterDocs {
-		trimmed := strings.TrimSpace(relPath)
-		if trimmed == "" {
-			continue
-		}
-		docPath := filepath.Join(cfg.Repositories.Docs, trimmed)
 		if seen[docPath] {
 			continue
 		}

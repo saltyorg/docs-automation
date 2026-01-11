@@ -27,7 +27,6 @@ The CLI reads `config.yml` for repository paths, templates, markers, and type in
 | `type_inference` | object | no | Variable type inference rules |
 | `docker_variables` | object | no | Docker variable suffix lists by type |
 | `cli_help` | object | no | CLI help generation settings |
-| `frontmatter_docs` | list | no | Docs files that only use frontmatter-managed sections |
 | `markers` | object | yes (`variables` required) | Managed section marker names |
 | `scaffold` | object | no | Output path patterns for scaffolding |
 
@@ -104,15 +103,6 @@ Each `patterns` entry includes:
 |-------|------|----------|-------------|
 | `binary_path` | string | no | Path to the `sb` binary used for `sb-docs cli` |
 | `docs_file` | string | no | Docs file (relative to `repositories.docs`) containing the CLI marker |
-
-### frontmatter_docs
-
-List of documentation files (relative to `repositories.docs`) that should be updated using frontmatter-only sections. These files will not attempt inventory generation.
-
-```yaml
-frontmatter_docs:
-  - "docs/index.md"
-```
 
 ### markers
 

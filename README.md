@@ -102,7 +102,7 @@ Each `patterns` entry includes:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `binary_path` | string | no | Path to the `sb`/`sb2` binary used for `sb-docs cli` |
+| `binary_path` | string | no | Path to the `sb` binary used for `sb-docs cli` |
 | `docs_file` | string | no | Docs file (relative to `repositories.docs`) containing the CLI marker |
 
 ### frontmatter_docs

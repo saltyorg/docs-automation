@@ -53,7 +53,7 @@ func (g *TableGenerator) LoadTemplate() error {
 // Generate creates an overview table from app links in frontmatter.
 // Returns empty string if no app links are defined.
 func (g *TableGenerator) Generate(automation *docs.SaltboxAutomationConfig) (string, error) {
-	if automation == nil || len(automation.AppLinks) == 0 {
+	if automation == nil {
 		return "", nil
 	}
 
@@ -64,6 +64,13 @@ func (g *TableGenerator) Generate(automation *docs.SaltboxAutomationConfig) (str
 
 	if g.tmpl == nil {
 		return "", fmt.Errorf("template not loaded")
+	}
+
+	if automation.ProjectDescription == nil {
+		if len(automation.AppLinks) == 0 {
+			return "", nil
+		}
+		return "", fmt.Errorf("project_description is required to render overview")
 	}
 
 	data := TableData{

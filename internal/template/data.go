@@ -127,8 +127,10 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *docs.Sal
 
 	// Collect docker variables defined in the role
 	var roleDockerVars []string
+	roleDockerPrefix := role.Name + "_docker_"
+	roleDockerRolePrefix := role.Name + "_role_docker_"
 	for _, v := range role.AllVariables {
-		if strings.Contains(v.Name, "_docker_") {
+		if strings.HasPrefix(v.Name, roleDockerPrefix) || strings.HasPrefix(v.Name, roleDockerRolePrefix) {
 			roleDockerVars = append(roleDockerVars, v.Name)
 		}
 	}

@@ -205,8 +205,8 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *docs.Sal
 		}
 	}
 
-	// Build DockerInfo if the role has docker variables
-	if len(roleDockerVars) > 0 && cfg != nil {
+	// Build DockerInfo if the role has docker variables and a Docker section is shown.
+	if len(roleDockerVars) > 0 && cfg != nil && shouldShowDockerInfo(role, fmConfig) {
 		data.DockerInfo = buildDockerInfo(cfg, role.Name, roleDockerVars)
 	}
 
@@ -378,6 +378,17 @@ func splitLines(s string) []string {
 		return nil
 	}
 	return strings.Split(s, "\n")
+}
+
+// shouldShowDockerInfo returns true when Docker+ should be shown.
+func shouldShowDockerInfo(role *parser.RoleInfo, fmConfig *docs.SaltboxAutomationConfig) bool {
+	if !role.HasDocker {
+		return false
+	}
+	if fmConfig != nil && !fmConfig.ShouldShowSection("Docker") {
+		return false
+	}
+	return true
 }
 
 // buildDocumentedVarSet collects variable names already shown in the role sections.

@@ -152,15 +152,6 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *docs.Sal
 				}
 				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, fmConfig)
 				sectionData.Variables = append(sectionData.Variables, varData)
-
-				for _, suffix := range parser.ExtractRoleVarLookups(v.RawValue) {
-					if _, exists := data.RoleVarLookups[suffix]; !exists {
-						data.RoleVarLookups[suffix] = &GlobalOverrideVar{
-							Suffix: suffix,
-							Type:   parser.InferRoleVarType(suffix, v.RawValue),
-						}
-					}
-				}
 			}
 
 			if len(sectionData.Variables) > 0 {
@@ -195,16 +186,6 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *docs.Sal
 				}
 				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, fmConfig)
 				sectionData.Variables = append(sectionData.Variables, varData)
-
-				// Collect role_var lookups (will be enriched later with config data)
-				for _, suffix := range parser.ExtractRoleVarLookups(v.RawValue) {
-					if _, exists := data.RoleVarLookups[suffix]; !exists {
-						data.RoleVarLookups[suffix] = &GlobalOverrideVar{
-							Suffix: suffix,
-							Type:   parser.InferRoleVarType(suffix, v.RawValue),
-						}
-					}
-				}
 			}
 
 			// Process subsections
@@ -217,16 +198,6 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *docs.Sal
 					}
 					varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, fmConfig)
 					sectionData.Subsections[subName] = append(sectionData.Subsections[subName], varData)
-
-					// Collect role_var lookups (will be enriched later with config data)
-					for _, suffix := range parser.ExtractRoleVarLookups(v.RawValue) {
-						if _, exists := data.RoleVarLookups[suffix]; !exists {
-							data.RoleVarLookups[suffix] = &GlobalOverrideVar{
-								Suffix: suffix,
-								Type:   parser.InferRoleVarType(suffix, v.RawValue),
-							}
-						}
-					}
 				}
 			}
 
@@ -254,6 +225,12 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *docs.Sal
 					}
 				}
 			}
+		}
+
+		// Remove overrides already covered by role defaults sections.
+		if len(data.RoleVarLookups) > 0 {
+			documentedVars := buildDocumentedVarSet(data.Sections)
+			data.RoleVarLookups = filterCoveredRoleVarLookups(data.RoleVarLookups, documentedVars, role.Name)
 		}
 
 		// Enrich all RoleVarLookups with config data (description, default, example)
@@ -401,6 +378,41 @@ func splitLines(s string) []string {
 		return nil
 	}
 	return strings.Split(s, "\n")
+}
+
+// buildDocumentedVarSet collects variable names already shown in the role sections.
+func buildDocumentedVarSet(sections map[string]*SectionData) map[string]bool {
+	documented := make(map[string]bool)
+	for _, section := range sections {
+		for _, v := range section.Variables {
+			documented[v.Name] = true
+		}
+		for _, vars := range section.Subsections {
+			for _, v := range vars {
+				documented[v.Name] = true
+			}
+		}
+	}
+	return documented
+}
+
+// filterCoveredRoleVarLookups drops overrides already documented as role variables.
+func filterCoveredRoleVarLookups(lookups map[string]*GlobalOverrideVar, documentedVars map[string]bool, roleName string) map[string]*GlobalOverrideVar {
+	if len(lookups) == 0 || len(documentedVars) == 0 {
+		return lookups
+	}
+
+	filtered := make(map[string]*GlobalOverrideVar, len(lookups))
+	rolePrefix := roleName + "_role"
+	for suffix, overrideVar := range lookups {
+		roleVarName := rolePrefix + suffix
+		if documentedVars[roleVarName] {
+			continue
+		}
+		filtered[suffix] = overrideVar
+	}
+
+	return filtered
 }
 
 // filterRoleVarLookups removes global override options that don't apply to the role

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -62,9 +64,54 @@ func (s *DockerVarScanner) FindDockerVarLookups() ([]string, error) {
 				s.cache[suffix] = true
 			}
 		}
+
+		addDockerVarSpecsToCache(s.cache, content)
 	}
 
 	return mapKeys(s.cache), nil
+}
+
+// addDockerVarSpecsToCache collects docker var suffixes from _docker_var_specs mappings.
+func addDockerVarSpecsToCache(cache map[string]bool, content []byte) {
+	var root yaml.Node
+	if err := yaml.Unmarshal(content, &root); err != nil {
+		return
+	}
+
+	var walk func(*yaml.Node)
+	walk = func(node *yaml.Node) {
+		switch node.Kind {
+		case yaml.DocumentNode, yaml.SequenceNode:
+			for _, child := range node.Content {
+				walk(child)
+			}
+		case yaml.MappingNode:
+			for i := 0; i+1 < len(node.Content); i += 2 {
+				key := node.Content[i]
+				value := node.Content[i+1]
+
+				if key.Kind == yaml.ScalarNode && key.Value == "_docker_var_specs" && value.Kind == yaml.MappingNode {
+					for j := 0; j+1 < len(value.Content); j += 2 {
+						specKey := value.Content[j]
+						if specKey.Kind != yaml.ScalarNode {
+							continue
+						}
+						if !strings.HasPrefix(specKey.Value, "_docker_") {
+							continue
+						}
+						suffix := strings.TrimPrefix(specKey.Value, "_docker_")
+						if suffix != "" {
+							cache[suffix] = true
+						}
+					}
+				}
+
+				walk(value)
+			}
+		}
+	}
+
+	walk(&root)
 }
 
 // GetDockerVarSuffixes returns docker variables that are NOT defined in the role's defaults.

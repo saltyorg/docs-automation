@@ -308,7 +308,11 @@ func buildDockerInfo(cfg *config.Config, roleName string, roleDockerVars []strin
 	resourcesPath := cfg.Repositories.Saltbox + "/resources"
 
 	scanner := parser.NewDockerVarScanner(resourcesPath)
-	additionalVars, err := scanner.GetDockerVarSuffixes(roleName, roleDockerVars)
+	additionalVars, err := scanner.GetDockerVarSuffixes(
+		roleName,
+		roleDockerVars,
+		cfg.DockerOverrides.IgnoreSuffixes,
+	)
 	if err != nil || len(additionalVars) == 0 {
 		return nil
 	}

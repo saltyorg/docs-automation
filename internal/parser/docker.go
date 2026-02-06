@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -118,7 +119,7 @@ func addDockerVarSpecsToCache(cache map[string]bool, content []byte) {
 // This identifies "additional" docker options available via create_docker_container
 // but not explicitly defined in the role.
 // The roleName is used to match the pattern {role}_role_docker_{suffix}.
-func (s *DockerVarScanner) GetDockerVarSuffixes(roleName string, roleDockerVars []string) ([]string, error) {
+func (s *DockerVarScanner) GetDockerVarSuffixes(roleName string, roleDockerVars, ignoreSuffixes []string) ([]string, error) {
 	allDockerVars, err := s.FindDockerVarLookups()
 	if err != nil {
 		return nil, err
@@ -137,15 +138,41 @@ func (s *DockerVarScanner) GetDockerVarSuffixes(roleName string, roleDockerVars 
 		}
 	}
 
+	// Build a normalized ignore set so config values can be either:
+	// - "_docker_dev_dri" (full lookup suffix), or
+	// - "dev_dri" (docker-specific suffix)
+	ignoreSet := make(map[string]bool)
+	for _, suffix := range ignoreSuffixes {
+		normalized := NormalizeDockerSuffix(suffix)
+		if normalized != "" {
+			ignoreSet[normalized] = true
+		}
+	}
+
 	// Filter out suffixes that are already defined in the role
 	var additionalVars []string
 	for _, suffix := range allDockerVars {
+		if ignoreSet[suffix] {
+			continue
+		}
 		if !roleVarSuffixes[suffix] {
 			additionalVars = append(additionalVars, suffix)
 		}
 	}
 
 	return additionalVars, nil
+}
+
+// NormalizeDockerSuffix converts a docker_var suffix to Docker+ suffix form.
+// Examples:
+// - "_docker_dev_dri" -> "dev_dri"
+// - "dev_dri" -> "dev_dri"
+// - "_dev_dri" -> "dev_dri"
+func NormalizeDockerSuffix(suffix string) string {
+	normalized := strings.TrimSpace(suffix)
+	normalized = strings.TrimPrefix(normalized, "_docker_")
+	normalized = strings.TrimPrefix(normalized, "_")
+	return normalized
 }
 
 // CategorizeDockerVars groups docker variable suffixes into categories.
@@ -206,6 +233,7 @@ func mapKeys(m map[string]bool) []string {
 	for k := range m {
 		keys = append(keys, k)
 	}
+	sort.Strings(keys)
 	return keys
 }
 

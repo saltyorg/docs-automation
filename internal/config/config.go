@@ -14,6 +14,7 @@ type Config struct {
 	Blacklist       BlacklistConfig              `yaml:"blacklist"`
 	PathOverrides   map[string]map[string]string `yaml:"path_overrides"`
 	GlobalOverrides GlobalOverrides              `yaml:"global_overrides"`
+	DockerOverrides DockerOverrides              `yaml:"docker_overrides"`
 	TypeInference   TypeInferenceConfig          `yaml:"type_inference"`
 	DockerVariables DockerVariables              `yaml:"docker_variables"`
 	CLIHelp         CLIHelpConfig                `yaml:"cli_help"`
@@ -43,6 +44,11 @@ type RepoBlacklist struct {
 type GlobalOverrides struct {
 	IgnoreSuffixes []string                  `yaml:"ignore_suffixes"`
 	Variables      map[string]OverrideVarDef `yaml:"variables"`
+}
+
+// DockerOverrides configures Docker+ docs generation overrides.
+type DockerOverrides struct {
+	IgnoreSuffixes []string `yaml:"ignore_suffixes"`
 }
 
 // OverrideVarDef defines a global override variable.

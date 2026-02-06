@@ -24,6 +24,7 @@ The CLI reads `config.yml` for repository paths, templates, markers, and type in
 | `blacklist` | object | no | Role lists excluded from coverage checks and generation |
 | `path_overrides` | map | no | Per-repo overrides for documentation file paths |
 | `global_overrides` | object | no | Metadata for `role_var` overrides (inventory scan + docs) |
+| `docker_overrides` | object | no | Overrides for Docker+ variable discovery in generated docs |
 | `type_inference` | object | no | Variable type inference rules |
 | `docker_variables` | object | no | Docker variable suffix lists by type |
 | `cli_help` | object | no | CLI help generation settings |
@@ -72,6 +73,14 @@ Each entry in `variables` is keyed by the `role_var` suffix (for example `_web_h
 | `default` | string or null | no | Default value; `null` means "no default shown" |
 | `type` | string | no | Override type label for docs |
 | `example` | string | no | Example snippet for docs (supports block scalars) |
+
+### docker_overrides
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `ignore_suffixes` | list | no | Docker+ suffixes to exclude from generated docs |
+
+`ignore_suffixes` accepts either full docker_var-style suffixes (for example `_docker_dev_dri`).
 
 ### type_inference
 

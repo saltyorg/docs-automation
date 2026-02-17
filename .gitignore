@@ -8,3 +8,4 @@ config.yml
 
 # Golang
 build/
+docs/

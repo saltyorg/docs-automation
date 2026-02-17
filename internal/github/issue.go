@@ -2,11 +2,16 @@ package github
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // IssueManager handles GitHub issue creation and management.
@@ -196,6 +201,32 @@ type ghIssue struct {
 	NodeID string `json:"id"` // GraphQL node ID for pinning
 }
 
+type issueBodyResponse struct {
+	Body string `json:"body"`
+}
+
+type issueCommentsResponse struct {
+	Comments []ghComment `json:"comments"`
+}
+
+type ghComment struct {
+	Body string `json:"body"`
+}
+
+type issueCounts struct {
+	MissingDocs             int
+	MissingSections         int
+	MissingOverviewSections int
+	OrphanedDocs            int
+}
+
+var (
+	missingDocsCountRegex             = regexp.MustCompile(`(?m)^### Missing Documentation \((\d+)\)$`)
+	missingSectionsCountRegex         = regexp.MustCompile(`(?m)^### Missing Variables Sections \((\d+)\)$`)
+	missingOverviewSectionsCountRegex = regexp.MustCompile(`(?m)^### Missing Overview Sections \((\d+)\)$`)
+	orphanedDocsCountRegex            = regexp.MustCompile(`(?m)^### Orphaned Documentation \((\d+)\)$`)
+)
+
 // ManageIssue creates, updates, or closes a GitHub issue based on check results.
 // It uses the gh CLI which must be installed and authenticated.
 func (m *IssueManager) ManageIssue(result *CheckResult, label string) error {
@@ -216,11 +247,43 @@ func (m *IssueManager) ManageIssue(result *CheckResult, label string) error {
 		body := m.GenerateIssueBody(result)
 
 		if existingIssue != nil {
-			// Update existing issue
-			if err := m.updateIssue(existingIssue.Number, title, body); err != nil {
-				return fmt.Errorf("updating issue: %w", err)
+			previousBody := ""
+			bodyLoaded := false
+			current, err := m.getIssueBody(existingIssue.Number)
+			if err != nil {
+				fmt.Printf("Note: could not load existing issue body for diff comment: %v\n", err)
+			} else {
+				previousBody = current
+				bodyLoaded = true
 			}
-			fmt.Printf("Updated issue #%d\n", existingIssue.Number)
+
+			titleChanged := existingIssue.Title != title
+			bodyChanged := bodyLoaded && previousBody != body
+
+			// Update existing issue
+			if titleChanged || bodyChanged || !bodyLoaded {
+				if err := m.updateIssue(existingIssue.Number, title, body); err != nil {
+					return fmt.Errorf("updating issue: %w", err)
+				}
+				fmt.Printf("Updated issue #%d\n", existingIssue.Number)
+			} else {
+				fmt.Printf("Issue #%d already up to date\n", existingIssue.Number)
+			}
+
+			if bodyChanged {
+				bodyHash := hashIssueBody(body)
+				alreadyPosted, err := m.hasCommentWithBodyHash(existingIssue.Number, bodyHash)
+				if err != nil {
+					fmt.Printf("Note: could not check existing update comments: %v\n", err)
+				} else if alreadyPosted {
+					fmt.Printf("Issue #%d update comment already posted for this body hash\n", existingIssue.Number)
+				} else {
+					comment := m.GenerateIssueBodyUpdateComment(previousBody, body)
+					if err := m.addComment(existingIssue.Number, comment); err != nil {
+						fmt.Printf("Note: could not add issue update comment: %v\n", err)
+					}
+				}
+			}
 
 			// Reopen if closed
 			if existingIssue.State == "CLOSED" {
@@ -302,6 +365,28 @@ func (m *IssueManager) findExistingIssue(label string) (*ghIssue, error) {
 	}
 
 	return &issues[0], nil
+}
+
+func (m *IssueManager) getIssueBody(number int) (string, error) {
+	cmd := exec.Command("gh", "issue", "view",
+		"--repo", m.repo,
+		fmt.Sprintf("%d", number),
+		"--json", "body")
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("%s: %w", stderr.String(), err)
+	}
+
+	var issue issueBodyResponse
+	if err := json.Unmarshal(stdout.Bytes(), &issue); err != nil {
+		return "", fmt.Errorf("parsing issue body: %w", err)
+	}
+
+	return issue.Body, nil
 }
 
 // createIssue creates a new GitHub issue and returns its number.
@@ -396,6 +481,35 @@ func (m *IssueManager) addComment(number int, body string) error {
 	return nil
 }
 
+func (m *IssueManager) hasCommentWithBodyHash(number int, bodyHash string) (bool, error) {
+	cmd := exec.Command("gh", "issue", "view",
+		"--repo", m.repo,
+		fmt.Sprintf("%d", number),
+		"--json", "comments")
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return false, fmt.Errorf("%s: %w", stderr.String(), err)
+	}
+
+	var response issueCommentsResponse
+	if err := json.Unmarshal(stdout.Bytes(), &response); err != nil {
+		return false, fmt.Errorf("parsing issue comments: %w", err)
+	}
+
+	marker := issueBodyHashMarker(bodyHash)
+	for _, comment := range response.Comments {
+		if strings.Contains(comment.Body, marker) {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
 // pinIssue pins an issue to the repository.
 func (m *IssueManager) pinIssue(number int) error {
 	cmd := exec.Command("gh", "issue", "pin", "--repo", m.repo, fmt.Sprintf("%d", number))
@@ -422,4 +536,237 @@ func (m *IssueManager) unpinIssue(number int) error {
 	}
 
 	return nil
+}
+
+// GenerateIssueBodyUpdateComment builds the comment posted when the issue body changes.
+func (m *IssueManager) GenerateIssueBodyUpdateComment(oldBody, newBody string) string {
+	oldCounts := extractIssueCounts(oldBody)
+	newCounts := extractIssueCounts(newBody)
+
+	var sb strings.Builder
+	sb.WriteString("### Docs Automation: Main Post Updated\n")
+	if m.workflowURL != "" {
+		sb.WriteString(fmt.Sprintf("Run: [workflow link](%s)\n", m.workflowURL))
+	}
+	sb.WriteString(fmt.Sprintf("Branch: `%s`\n", m.branch))
+	sb.WriteString(fmt.Sprintf("Timestamp: `%s`\n\n", time.Now().UTC().Format(time.RFC3339)))
+
+	sb.WriteString("| Section | Before | After | Delta |\n")
+	sb.WriteString("|---|---:|---:|---:|\n")
+	sb.WriteString(fmt.Sprintf("| Missing Documentation | %d | %d | %s |\n",
+		oldCounts.MissingDocs, newCounts.MissingDocs, formatDelta(newCounts.MissingDocs-oldCounts.MissingDocs)))
+	sb.WriteString(fmt.Sprintf("| Missing Variables Sections | %d | %d | %s |\n",
+		oldCounts.MissingSections, newCounts.MissingSections, formatDelta(newCounts.MissingSections-oldCounts.MissingSections)))
+	sb.WriteString(fmt.Sprintf("| Missing Overview Sections | %d | %d | %s |\n",
+		oldCounts.MissingOverviewSections, newCounts.MissingOverviewSections, formatDelta(newCounts.MissingOverviewSections-oldCounts.MissingOverviewSections)))
+	sb.WriteString(fmt.Sprintf("| Orphaned Documentation | %d | %d | %s |\n\n",
+		oldCounts.OrphanedDocs, newCounts.OrphanedDocs, formatDelta(newCounts.OrphanedDocs-oldCounts.OrphanedDocs)))
+
+	sb.WriteString("<details>\n")
+	sb.WriteString("<summary>Issue body diff</summary>\n\n")
+	sb.WriteString("```diff\n")
+	sb.WriteString(buildCompactLineDiff(oldBody, newBody, 160))
+	sb.WriteString("\n```\n")
+	sb.WriteString("</details>\n\n")
+
+	sb.WriteString(issueBodyHashMarker(hashIssueBody(newBody)))
+
+	return sb.String()
+}
+
+func extractIssueCounts(body string) issueCounts {
+	return issueCounts{
+		MissingDocs:             parseIssueCount(body, missingDocsCountRegex),
+		MissingSections:         parseIssueCount(body, missingSectionsCountRegex),
+		MissingOverviewSections: parseIssueCount(body, missingOverviewSectionsCountRegex),
+		OrphanedDocs:            parseIssueCount(body, orphanedDocsCountRegex),
+	}
+}
+
+func parseIssueCount(body string, pattern *regexp.Regexp) int {
+	matches := pattern.FindStringSubmatch(body)
+	if len(matches) != 2 {
+		return 0
+	}
+
+	count, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return 0
+	}
+	return count
+}
+
+func formatDelta(delta int) string {
+	if delta > 0 {
+		return fmt.Sprintf("+%d", delta)
+	}
+	return fmt.Sprintf("%d", delta)
+}
+
+func hashIssueBody(body string) string {
+	sum := sha256.Sum256([]byte(body))
+	return hex.EncodeToString(sum[:])
+}
+
+func issueBodyHashMarker(hash string) string {
+	return fmt.Sprintf("<!-- docs-automation-body-sha256:%s -->", hash)
+}
+
+type diffOp struct {
+	kind byte
+	line string
+}
+
+func buildCompactLineDiff(oldBody, newBody string, maxChangedLines int) string {
+	oldLines := splitLinesPreserveEmpty(oldBody)
+	newLines := splitLinesPreserveEmpty(newBody)
+
+	ops := computeDiffOps(oldLines, newLines)
+
+	var sb strings.Builder
+	inHunk := false
+	oldPos := 1
+	newPos := 1
+	hunkOldStart := 0
+	hunkNewStart := 0
+	hunkOldCount := 0
+	hunkNewCount := 0
+	changedLines := 0
+
+	flushHunk := func(lines []string) {
+		if !inHunk {
+			return
+		}
+		sb.WriteString(fmt.Sprintf("@@ -%d,%d +%d,%d @@\n", hunkOldStart, hunkOldCount, hunkNewStart, hunkNewCount))
+		for _, line := range lines {
+			sb.WriteString(line)
+			sb.WriteByte('\n')
+		}
+		inHunk = false
+	}
+
+	hunkLines := make([]string, 0)
+
+	for _, op := range ops {
+		switch op.kind {
+		case '=':
+			if inHunk {
+				flushHunk(hunkLines)
+				hunkLines = hunkLines[:0]
+			}
+			oldPos++
+			newPos++
+		case '-':
+			if changedLines >= maxChangedLines {
+				continue
+			}
+			if !inHunk {
+				inHunk = true
+				hunkOldStart = oldPos
+				hunkNewStart = newPos
+				hunkOldCount = 0
+				hunkNewCount = 0
+			}
+			hunkOldCount++
+			hunkLines = append(hunkLines, "-"+truncateDiffLine(op.line, 300))
+			oldPos++
+			changedLines++
+		case '+':
+			if changedLines >= maxChangedLines {
+				continue
+			}
+			if !inHunk {
+				inHunk = true
+				hunkOldStart = oldPos
+				hunkNewStart = newPos
+				hunkOldCount = 0
+				hunkNewCount = 0
+			}
+			hunkNewCount++
+			hunkLines = append(hunkLines, "+"+truncateDiffLine(op.line, 300))
+			newPos++
+			changedLines++
+		}
+	}
+
+	if inHunk {
+		flushHunk(hunkLines)
+	}
+
+	diff := strings.TrimSpace(sb.String())
+	if diff == "" {
+		return "- (no line-level diff available)\n+ (issue body changed)"
+	}
+	if changedLines >= maxChangedLines {
+		diff += "\n... (diff truncated)"
+	}
+	return diff
+}
+
+func splitLinesPreserveEmpty(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	return strings.Split(s, "\n")
+}
+
+func truncateDiffLine(line string, maxLen int) string {
+	if len(line) <= maxLen {
+		return line
+	}
+	if maxLen < 4 {
+		return line[:maxLen]
+	}
+	return line[:maxLen-3] + "..."
+}
+
+func computeDiffOps(oldLines, newLines []string) []diffOp {
+	n := len(oldLines)
+	m := len(newLines)
+
+	lcs := make([][]int, n+1)
+	for i := range lcs {
+		lcs[i] = make([]int, m+1)
+	}
+
+	for i := n - 1; i >= 0; i-- {
+		for j := m - 1; j >= 0; j-- {
+			if oldLines[i] == newLines[j] {
+				lcs[i][j] = lcs[i+1][j+1] + 1
+			} else if lcs[i+1][j] >= lcs[i][j+1] {
+				lcs[i][j] = lcs[i+1][j]
+			} else {
+				lcs[i][j] = lcs[i][j+1]
+			}
+		}
+	}
+
+	i := 0
+	j := 0
+	ops := make([]diffOp, 0, n+m)
+	for i < n && j < m {
+		if oldLines[i] == newLines[j] {
+			ops = append(ops, diffOp{kind: '=', line: oldLines[i]})
+			i++
+			j++
+		} else if lcs[i+1][j] >= lcs[i][j+1] {
+			ops = append(ops, diffOp{kind: '-', line: oldLines[i]})
+			i++
+		} else {
+			ops = append(ops, diffOp{kind: '+', line: newLines[j]})
+			j++
+		}
+	}
+
+	for i < n {
+		ops = append(ops, diffOp{kind: '-', line: oldLines[i]})
+		i++
+	}
+	for j < m {
+		ops = append(ops, diffOp{kind: '+', line: newLines[j]})
+		j++
+	}
+
+	return ops
 }

@@ -225,6 +225,7 @@ var (
 	missingSectionsCountRegex         = regexp.MustCompile(`(?m)^### Missing Variables Sections \((\d+)\)$`)
 	missingOverviewSectionsCountRegex = regexp.MustCompile(`(?m)^### Missing Overview Sections \((\d+)\)$`)
 	orphanedDocsCountRegex            = regexp.MustCompile(`(?m)^### Orphaned Documentation \((\d+)\)$`)
+	workflowRunLineRegex              = regexp.MustCompile(`(?m)^\*\*Workflow run:\*\* \[link\]\([^)]+\)\n?`)
 )
 
 // ManageIssue creates, updates, or closes a GitHub issue based on check results.
@@ -259,6 +260,7 @@ func (m *IssueManager) ManageIssue(result *CheckResult, label string) error {
 
 			titleChanged := existingIssue.Title != title
 			bodyChanged := bodyLoaded && previousBody != body
+			semanticBodyChanged := bodyLoaded && normalizeIssueBodyForChangeDetection(previousBody) != normalizeIssueBodyForChangeDetection(body)
 
 			// Update existing issue
 			if titleChanged || bodyChanged || !bodyLoaded {
@@ -270,8 +272,8 @@ func (m *IssueManager) ManageIssue(result *CheckResult, label string) error {
 				fmt.Printf("Issue #%d already up to date\n", existingIssue.Number)
 			}
 
-			if bodyChanged {
-				bodyHash := hashIssueBody(body)
+			if semanticBodyChanged {
+				bodyHash := hashIssueBody(normalizeIssueBodyForChangeDetection(body))
 				alreadyPosted, err := m.hasCommentWithBodyHash(existingIssue.Number, bodyHash)
 				if err != nil {
 					fmt.Printf("Note: could not check existing update comments: %v\n", err)
@@ -569,7 +571,7 @@ func (m *IssueManager) GenerateIssueBodyUpdateComment(oldBody, newBody string) s
 	sb.WriteString("\n```\n")
 	sb.WriteString("</details>\n\n")
 
-	sb.WriteString(issueBodyHashMarker(hashIssueBody(newBody)))
+	sb.WriteString(issueBodyHashMarker(hashIssueBody(normalizeIssueBodyForChangeDetection(newBody))))
 
 	return sb.String()
 }
@@ -610,6 +612,12 @@ func hashIssueBody(body string) string {
 
 func issueBodyHashMarker(hash string) string {
 	return fmt.Sprintf("<!-- docs-automation-body-sha256:%s -->", hash)
+}
+
+func normalizeIssueBodyForChangeDetection(body string) string {
+	normalized := strings.ReplaceAll(body, "\r\n", "\n")
+	normalized = workflowRunLineRegex.ReplaceAllString(normalized, "")
+	return strings.TrimSpace(normalized)
 }
 
 type diffOp struct {

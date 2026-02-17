@@ -109,3 +109,29 @@ func TestGenerateIssueBodyUpdateComment(t *testing.T) {
 		t.Fatalf("missing body hash marker")
 	}
 }
+
+func TestNormalizeIssueBodyForChangeDetectionIgnoresWorkflowRunLine(t *testing.T) {
+	a := `## 📝 Documentation Status
+
+### Missing Documentation (1)
+
+---
+**Workflow run:** [link](https://example.com/runs/100)
+*This issue is automatically managed by docs-automation*
+`
+	b := `## 📝 Documentation Status
+
+### Missing Documentation (1)
+
+---
+**Workflow run:** [link](https://example.com/runs/200)
+*This issue is automatically managed by docs-automation*
+`
+
+	na := normalizeIssueBodyForChangeDetection(a)
+	nb := normalizeIssueBodyForChangeDetection(b)
+
+	if na != nb {
+		t.Fatalf("expected normalized bodies to match when only workflow run URL differs")
+	}
+}

@@ -55,50 +55,50 @@ func (m *IssueManager) GenerateIssueBody(result *CheckResult) string {
 	builder.WriteString("## 📝 Documentation Status\n\n")
 
 	if len(result.MissingDocs) > 0 {
-		builder.WriteString(fmt.Sprintf("### Missing Documentation (%d)\n", len(result.MissingDocs)))
+		builder.WriteString("### Missing Documentation (" + strconv.Itoa(len(result.MissingDocs)) + ")\n")
 		builder.WriteString("Roles without corresponding documentation pages:\n\n")
 		for _, role := range result.MissingDocs {
-			builder.WriteString(fmt.Sprintf("- [ ] `%s`\n", role))
+			fmt.Fprintf(&builder, "- [ ] `%s`\n", role)
 		}
 		builder.WriteString("\n")
 	}
 
 	if len(result.MissingSections) > 0 {
-		builder.WriteString(fmt.Sprintf("### Missing Variables Sections (%d)\n", len(result.MissingSections)))
+		fmt.Fprintf(&builder, "### Missing Variables Sections (%d)\n", len(result.MissingSections))
 		builder.WriteString("Documentation pages without the managed variables section:\n\n")
 		for _, doc := range result.MissingSections {
 			// Convert path to GitHub link
 			docName := extractDocName(doc)
 			link := fmt.Sprintf("https://github.com/%s/blob/%s/%s", m.repo, m.branch, doc)
-			builder.WriteString(fmt.Sprintf("- [ ] [%s](%s)\n", docName, link))
+			fmt.Fprintf(&builder, "- [ ] [%s](%s)\n", docName, link)
 		}
 		builder.WriteString("\n")
 	}
 
 	if len(result.MissingOverviewSections) > 0 {
-		builder.WriteString(fmt.Sprintf("### Missing Overview Sections (%d)\n", len(result.MissingOverviewSections)))
+		fmt.Fprintf(&builder, "### Missing Overview Sections (%d)\n", len(result.MissingOverviewSections))
 		builder.WriteString("Documentation pages without the managed overview section:\n\n")
 		for _, doc := range result.MissingOverviewSections {
 			// Convert path to GitHub link
 			docName := extractDocName(doc)
 			link := fmt.Sprintf("https://github.com/%s/blob/%s/%s", m.repo, m.branch, doc)
-			builder.WriteString(fmt.Sprintf("- [ ] [%s](%s)\n", docName, link))
+			fmt.Fprintf(&builder, "- [ ] [%s](%s)\n", docName, link)
 		}
 		builder.WriteString("\n")
 	}
 
 	if len(result.OrphanedDocs) > 0 {
-		builder.WriteString(fmt.Sprintf("### Orphaned Documentation (%d)\n", len(result.OrphanedDocs)))
+		fmt.Fprintf(&builder, "### Orphaned Documentation (%d)\n", len(result.OrphanedDocs))
 		builder.WriteString("Documentation pages without corresponding roles:\n\n")
 		for _, doc := range result.OrphanedDocs {
-			builder.WriteString(fmt.Sprintf("- [ ] `%s`\n", doc))
+			fmt.Fprintf(&builder, "- [ ] `%s`\n", doc)
 		}
 		builder.WriteString("\n")
 	}
 
 	builder.WriteString("---\n")
 	if m.workflowURL != "" {
-		builder.WriteString(fmt.Sprintf("**Workflow run:** [link](%s)\n", m.workflowURL))
+		fmt.Fprintf(&builder, "**Workflow run:** [link](%s)\n", m.workflowURL)
 	}
 	builder.WriteString("*This issue is automatically managed by docs-automation*\n")
 
@@ -134,21 +134,36 @@ func (m *IssueManager) OutputGitHubActions(result *CheckResult) {
 		fmt.Fprintf(os.Stderr, "Warning: could not write to GITHUB_OUTPUT: %v\n", err)
 		return
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Warning: could not close GITHUB_OUTPUT: %v\n", err)
+		}
+	}()
+	writeOutput := func(format string, args ...any) bool {
+		if _, err := fmt.Fprintf(f, format, args...); err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Warning: could not write to GITHUB_OUTPUT: %v\n", err)
+			return false
+		}
+		return true
+	}
 
 	// Write outputs
-	fmt.Fprintf(f, "has_issues=%t\n", result.HasIssues())
-	fmt.Fprintf(f, "total_issues=%d\n", result.TotalIssues())
-	fmt.Fprintf(f, "missing_docs=%d\n", len(result.MissingDocs))
-	fmt.Fprintf(f, "missing_sections=%d\n", len(result.MissingSections))
-	fmt.Fprintf(f, "missing_overview_sections=%d\n", len(result.MissingOverviewSections))
-	fmt.Fprintf(f, "orphaned_docs=%d\n", len(result.OrphanedDocs))
+	if !writeOutput("has_issues=%t\n", result.HasIssues()) ||
+		!writeOutput("total_issues=%d\n", result.TotalIssues()) ||
+		!writeOutput("missing_docs=%d\n", len(result.MissingDocs)) ||
+		!writeOutput("missing_sections=%d\n", len(result.MissingSections)) ||
+		!writeOutput("missing_overview_sections=%d\n", len(result.MissingOverviewSections)) ||
+		!writeOutput("orphaned_docs=%d\n", len(result.OrphanedDocs)) {
+		return
+	}
 
 	// For multiline output (issue body), use delimiter
 	if result.HasIssues() {
 		issueBody := m.GenerateIssueBody(result)
-		fmt.Fprintf(f, "issue_title=%s\n", m.GenerateIssueTitle(result))
-		fmt.Fprintf(f, "issue_body<<EOF\n%s\nEOF\n", issueBody)
+		if !writeOutput("issue_title=%s\n", m.GenerateIssueTitle(result)) {
+			return
+		}
+		_ = writeOutput("issue_body<<EOF\n%s\nEOF\n", issueBody)
 	}
 }
 
@@ -548,21 +563,21 @@ func (m *IssueManager) GenerateIssueBodyUpdateComment(oldBody, newBody string) s
 	var sb strings.Builder
 	sb.WriteString("### Docs Automation: Main Post Updated\n")
 	if m.workflowURL != "" {
-		sb.WriteString(fmt.Sprintf("Run: [workflow link](%s)\n", m.workflowURL))
+		fmt.Fprintf(&sb, "Run: [workflow link](%s)\n", m.workflowURL)
 	}
-	sb.WriteString(fmt.Sprintf("Branch: `%s`\n", m.branch))
-	sb.WriteString(fmt.Sprintf("Timestamp: `%s`\n\n", time.Now().UTC().Format(time.RFC3339)))
+	fmt.Fprintf(&sb, "Branch: `%s`\n", m.branch)
+	fmt.Fprintf(&sb, "Timestamp: `%s`\n\n", time.Now().UTC().Format(time.RFC3339))
 
 	sb.WriteString("| Section | Before | After | Delta |\n")
 	sb.WriteString("|---|---:|---:|---:|\n")
-	sb.WriteString(fmt.Sprintf("| Missing Documentation | %d | %d | %s |\n",
-		oldCounts.MissingDocs, newCounts.MissingDocs, formatDelta(newCounts.MissingDocs-oldCounts.MissingDocs)))
-	sb.WriteString(fmt.Sprintf("| Missing Variables Sections | %d | %d | %s |\n",
-		oldCounts.MissingSections, newCounts.MissingSections, formatDelta(newCounts.MissingSections-oldCounts.MissingSections)))
-	sb.WriteString(fmt.Sprintf("| Missing Overview Sections | %d | %d | %s |\n",
-		oldCounts.MissingOverviewSections, newCounts.MissingOverviewSections, formatDelta(newCounts.MissingOverviewSections-oldCounts.MissingOverviewSections)))
-	sb.WriteString(fmt.Sprintf("| Orphaned Documentation | %d | %d | %s |\n\n",
-		oldCounts.OrphanedDocs, newCounts.OrphanedDocs, formatDelta(newCounts.OrphanedDocs-oldCounts.OrphanedDocs)))
+	fmt.Fprintf(&sb, "| Missing Documentation | %d | %d | %s |\n",
+		oldCounts.MissingDocs, newCounts.MissingDocs, formatDelta(newCounts.MissingDocs-oldCounts.MissingDocs))
+	fmt.Fprintf(&sb, "| Missing Variables Sections | %d | %d | %s |\n",
+		oldCounts.MissingSections, newCounts.MissingSections, formatDelta(newCounts.MissingSections-oldCounts.MissingSections))
+	fmt.Fprintf(&sb, "| Missing Overview Sections | %d | %d | %s |\n",
+		oldCounts.MissingOverviewSections, newCounts.MissingOverviewSections, formatDelta(newCounts.MissingOverviewSections-oldCounts.MissingOverviewSections))
+	fmt.Fprintf(&sb, "| Orphaned Documentation | %d | %d | %s |\n\n",
+		oldCounts.OrphanedDocs, newCounts.OrphanedDocs, formatDelta(newCounts.OrphanedDocs-oldCounts.OrphanedDocs))
 
 	sb.WriteString("<details>\n")
 	sb.WriteString("<summary>Issue body diff</summary>\n\n")
@@ -645,7 +660,7 @@ func buildCompactLineDiff(oldBody, newBody string, maxChangedLines int) string {
 		if !inHunk {
 			return
 		}
-		sb.WriteString(fmt.Sprintf("@@ -%d,%d +%d,%d @@\n", hunkOldStart, hunkOldCount, hunkNewStart, hunkNewCount))
+		fmt.Fprintf(&sb, "@@ -%d,%d +%d,%d @@\n", hunkOldStart, hunkOldCount, hunkNewStart, hunkNewCount)
 		for _, line := range lines {
 			sb.WriteString(line)
 			sb.WriteByte('\n')

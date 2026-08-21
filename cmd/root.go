@@ -1,21 +1,37 @@
 package cmd
 
 import (
-	"os"
+	"context"
 
+	"github.com/saltyorg/docs-automation/buildinfo"
+	"github.com/saltyorg/docs-automation/config"
 	"github.com/spf13/cobra"
 )
 
-var (
-	cfgFile string
-	verbose bool
-)
+type rootOptions struct {
+	configPath string
+	verbose    bool
+}
 
-// rootCmd represents the base command when called without any subcommands.
-var rootCmd = &cobra.Command{
-	Use:   "sb-docs",
-	Short: "Saltbox documentation automation tool",
-	Long: `sb-docs automates documentation management for Saltbox and Sandbox Ansible roles.
+type dependencies struct {
+	loadConfig func(string) (*config.Config, error)
+}
+
+func defaultDependencies() dependencies {
+	return dependencies{loadConfig: config.Load}
+}
+
+// NewRootCmd builds a fresh sb-docs command tree.
+func NewRootCmd() *cobra.Command {
+	return newRootCmd(defaultDependencies())
+}
+
+func newRootCmd(deps dependencies) *cobra.Command {
+	opts := &rootOptions{}
+	rootCmd := &cobra.Command{
+		Use:   "sb-docs",
+		Short: "Saltbox documentation automation tool",
+		Long: `sb-docs automates documentation management for Saltbox and Sandbox Ansible roles.
 
 It performs the following core functions:
   - Documentation coverage checking
@@ -23,27 +39,26 @@ It performs the following core functions:
   - CLI help documentation updates
   - Overview table generation from frontmatter
   - New app documentation scaffolding`,
-	SilenceUsage: true, // Don't print usage on errors unrelated to flags
-}
-
-// Execute adds all child commands to the root command and sets flags appropriately.
-func Execute() {
-	if err := rootCmd.Execute(); err != nil {
-		os.Exit(1)
+		Version:       buildinfo.VersionString(),
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
+	rootCmd.SetVersionTemplate("{{.Version}}\n")
+	rootCmd.PersistentFlags().StringVar(&opts.configPath, "config", "config.yml", "config file path")
+	rootCmd.PersistentFlags().BoolVarP(&opts.verbose, "verbose", "v", false, "enable verbose output")
+	rootCmd.AddCommand(
+		newCLICommand(opts, deps),
+		newGenerateCommand(opts, deps),
+		newIndexCommand(opts),
+		newScaffoldCommand(opts, deps),
+		newUpdateCommand(opts, deps),
+		newValidateCommand(opts, deps),
+		newVersionCommand(),
+	)
+	return rootCmd
 }
 
-func init() {
-	rootCmd.PersistentFlags().StringVar(&cfgFile, "config", "config.yml", "config file path")
-	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "enable verbose output")
-}
-
-// GetConfigPath returns the configured config file path.
-func GetConfigPath() string {
-	return cfgFile
-}
-
-// IsVerbose returns whether verbose mode is enabled.
-func IsVerbose() bool {
-	return verbose
+// Execute runs a fresh command tree with the supplied context.
+func Execute(ctx context.Context) error {
+	return NewRootCmd().ExecuteContext(ctx)
 }

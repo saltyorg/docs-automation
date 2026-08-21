@@ -1,4 +1,4 @@
-package docs
+package document
 
 import (
 	"fmt"

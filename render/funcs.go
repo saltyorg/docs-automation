@@ -1,11 +1,10 @@
-package template
+package render
 
 import (
 	"strings"
 	"text/template"
 
-	"github.com/saltyorg/docs-automation/internal/parser"
-	"github.com/saltyorg/docs-automation/internal/types"
+	"github.com/saltyorg/docs-automation/parser"
 )
 
 // FuncMap returns the template function map.
@@ -112,13 +111,13 @@ func renderMultilineValueAdjusted(originalName, newName string, valueLines []str
 // formatTypeComment formats a type as a YAML comment.
 // This matches Python's format_type_comment behavior.
 func formatTypeComment(typ string) string {
-	return types.TypeComment(typ)
+	return parser.TypeComment(typ)
 }
 
 // typeKeyword extracts just the type keyword for use in ??? variable annotations.
 // For example "bool (true/false)" -> "bool", "list" -> "list"
 func typeKeyword(typ string) string {
-	return types.Keyword(typ)
+	return parser.Keyword(typ)
 }
 
 // replaceVariable replaces {variable} placeholder with the actual variable name.

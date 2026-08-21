@@ -1,12 +1,12 @@
-package template
+package render
 
 import (
 	"sort"
 	"strings"
 
-	"github.com/saltyorg/docs-automation/internal/config"
-	"github.com/saltyorg/docs-automation/internal/docs"
-	"github.com/saltyorg/docs-automation/internal/parser"
+	"github.com/saltyorg/docs-automation/config"
+	"github.com/saltyorg/docs-automation/document"
+	"github.com/saltyorg/docs-automation/parser"
 )
 
 // RoleData contains all data needed to render role documentation.
@@ -38,7 +38,7 @@ type RoleData struct {
 	ExampleValue string
 
 	// Frontmatter configuration (from doc file)
-	Config *docs.SaltboxAutomationConfig
+	Config *document.SaltboxAutomationConfig
 
 	// Global config for type inference
 	GlobalConfig *config.Config
@@ -77,6 +77,7 @@ type VariableData struct {
 	Type         string
 	Comment      string
 	CommentLines []string
+	Description  string
 	IsMultiline  bool
 	ValueLines   []string
 	InstanceName string // Instance-level variable name
@@ -86,6 +87,7 @@ type VariableData struct {
 type DockerInfo struct {
 	Categories    map[string][]string // category -> list of var suffixes
 	CategoryOrder []string
+	Overrides     map[string]*GlobalOverrideVar // normalized suffix -> configured metadata
 }
 
 // GlobalOverrideVar contains information about a global override variable.
@@ -99,7 +101,7 @@ type GlobalOverrideVar struct {
 }
 
 // BuildRoleData creates RoleData from parsed role information.
-func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *docs.SaltboxAutomationConfig) *RoleData {
+func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document.SaltboxAutomationConfig) *RoleData {
 	data := &RoleData{
 		RoleName:       role.Name,
 		RepoType:       role.RepoType,
@@ -150,7 +152,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *docs.Sal
 				if hideBase[v.Name] {
 					continue
 				}
-				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, fmConfig)
+				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, cfg, fmConfig)
 				sectionData.Variables = append(sectionData.Variables, varData)
 			}
 
@@ -184,7 +186,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *docs.Sal
 				if hideBase[v.Name] {
 					continue
 				}
-				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, fmConfig)
+				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, cfg, fmConfig)
 				sectionData.Variables = append(sectionData.Variables, varData)
 			}
 
@@ -196,7 +198,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *docs.Sal
 					if hideBase[v.Name] {
 						continue
 					}
-					varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, fmConfig)
+					varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, cfg, fmConfig)
 					sectionData.Subsections[subName] = append(sectionData.Subsections[subName], varData)
 				}
 			}
@@ -336,14 +338,39 @@ func buildDockerInfo(cfg *config.Config, roleName string, roleDockerVars []strin
 		return nil
 	}
 
+	overrides := make(map[string]*GlobalOverrideVar)
+	for _, suffix := range additionalVars {
+		varDef, exists := findDockerOverride(cfg.DockerOverrides.Variables, suffix)
+		if !exists {
+			continue
+		}
+
+		varType := varDef.Type
+		if varType == "" {
+			varType = parser.GetDockerVarType(suffix)
+		}
+		overrideVar := &GlobalOverrideVar{
+			Suffix:      suffix,
+			Type:        varType,
+			Description: varDef.Description,
+			Example:     varDef.Example,
+		}
+		if varDef.Default != nil {
+			overrideVar.Default = *varDef.Default
+			overrideVar.HasDefault = true
+		}
+		overrides[suffix] = overrideVar
+	}
+
 	return &DockerInfo{
 		Categories:    filteredCategories,
 		CategoryOrder: parser.DockerVarCategoryOrder(),
+		Overrides:     overrides,
 	}
 }
 
 // buildVariableData creates VariableData from a parsed Variable.
-func buildVariableData(v *parser.Variable, roleName, instanceName string, typeInfer *parser.TypeInferrer, fmConfig *docs.SaltboxAutomationConfig) *VariableData {
+func buildVariableData(v *parser.Variable, roleName, instanceName string, typeInfer *parser.TypeInferrer, cfg *config.Config, fmConfig *document.SaltboxAutomationConfig) *VariableData {
 	// Check for example override
 	rawValue := v.RawValue
 	if fmConfig != nil {
@@ -354,6 +381,19 @@ func buildVariableData(v *parser.Variable, roleName, instanceName string, typeIn
 
 	// Infer type
 	typ := typeInfer.InferType(v.Name, rawValue)
+	description := ""
+	if cfg != nil {
+		if suffix, ok := dockerVariableSuffix(v.Name, roleName); ok {
+			if varDef, exists := findDockerOverride(cfg.DockerOverrides.Variables, suffix); exists {
+				if varDef.Type != "" {
+					typ = varDef.Type
+				}
+				if varDef.Description != "" {
+					description = varDef.Description
+				}
+			}
+		}
+	}
 
 	// Generate instance name
 	instName := parser.GenerateInstanceName(v.Name, roleName, instanceName)
@@ -370,10 +410,29 @@ func buildVariableData(v *parser.Variable, roleName, instanceName string, typeIn
 		Type:         typ,
 		Comment:      v.Comment,
 		CommentLines: commentLines,
+		Description:  description,
 		IsMultiline:  v.IsMultiline,
 		ValueLines:   v.ValueLines,
 		InstanceName: instName,
 	}
+}
+
+func dockerVariableSuffix(varName, roleName string) (string, bool) {
+	for _, prefix := range []string{roleName + "_role_docker_", roleName + "_docker_"} {
+		if suffix, ok := strings.CutPrefix(varName, prefix); ok {
+			return suffix, true
+		}
+	}
+	return "", false
+}
+
+func findDockerOverride(variables map[string]config.OverrideVarDef, suffix string) (config.OverrideVarDef, bool) {
+	for _, key := range []string{suffix, "_docker_" + suffix, "_" + suffix} {
+		if varDef, exists := variables[key]; exists {
+			return varDef, true
+		}
+	}
+	return config.OverrideVarDef{}, false
 }
 
 // splitLines splits a string into lines.
@@ -385,7 +444,7 @@ func splitLines(s string) []string {
 }
 
 // shouldShowDockerInfo returns true when Docker+ should be shown.
-func shouldShowDockerInfo(role *parser.RoleInfo, fmConfig *docs.SaltboxAutomationConfig) bool {
+func shouldShowDockerInfo(role *parser.RoleInfo, fmConfig *document.SaltboxAutomationConfig) bool {
 	if !role.HasDocker {
 		return false
 	}

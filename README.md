@@ -12,6 +12,19 @@ There are two distinct configuration surfaces:
 
 The CLI reads `config.yml` for repository paths, templates, markers, and type inference settings. The section below documents all configuration options.
 
+## Architecture
+
+The project uses a flat, command-first layout:
+
+- `cmd/` builds Cobra commands, binds flags, validates arguments, and routes calls.
+- `automation/` owns the update, generate, validate, scaffold, index, and CLI-help workflows behind `Runner`.
+- `config/`, `document/`, `parser/`, and `render/` own documentation configuration and transformation.
+- `github/` and `clihelp/` are concrete external adapters.
+- `buildinfo/` contains immutable build metadata.
+- `main.go` wires process context, signals, errors, and exit status.
+
+Application code does not use an `internal/` hierarchy, and workflow logic does not belong in `cmd/`.
+
 ## Configuration File (`config.yml`)
 
 `sb-docs` loads `config.yml` by default. Override the path with `--config`.
@@ -79,8 +92,9 @@ Each entry in `variables` is keyed by the `role_var` suffix (for example `_web_h
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `ignore_suffixes` | list | no | Docker+ suffixes to exclude from generated docs |
+| `variables` | map | no | Per-suffix metadata applied to role-defined and Docker+ variables |
 
-`ignore_suffixes` accepts either full docker_var-style suffixes (for example `_docker_dev_dri`).
+Both maps accept either full docker_var-style suffixes (for example `_docker_dev_dri`) or normalized suffixes (for example `dev_dri`). Entries in `variables` use the same `description`, `default`, `type`, and `example` fields as `global_overrides.variables`. Configured descriptions are shown alongside existing role metadata, configured types override inferred types, and configured defaults and examples are used for Docker+ variables that are not defined in the role.
 
 ### type_inference
 

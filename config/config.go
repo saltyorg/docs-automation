@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // Config represents the complete configuration for docs automation.
@@ -48,10 +48,11 @@ type GlobalOverrides struct {
 
 // DockerOverrides configures Docker+ docs generation overrides.
 type DockerOverrides struct {
-	IgnoreSuffixes []string `yaml:"ignore_suffixes"`
+	IgnoreSuffixes []string                  `yaml:"ignore_suffixes"`
+	Variables      map[string]OverrideVarDef `yaml:"variables"`
 }
 
-// OverrideVarDef defines a global override variable.
+// OverrideVarDef defines reusable override metadata.
 type OverrideVarDef struct {
 	Description string  `yaml:"description"`
 	Default     *string `yaml:"default"` // Pointer to distinguish null/missing from empty string

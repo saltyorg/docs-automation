@@ -13,9 +13,9 @@ BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 CGO_ENABLED := 0
 GO_FLAGS := -trimpath
 LDFLAGS := -w -s \
-	-X '$(MODULE)/internal/runtime.Version=$(VERSION)' \
-	-X '$(MODULE)/internal/runtime.GitCommit=$(GIT_COMMIT)' \
-	-X '$(MODULE)/internal/runtime.BuildTime=$(BUILD_TIME)'
+	-X '$(MODULE)/buildinfo.Version=$(VERSION)' \
+	-X '$(MODULE)/buildinfo.GitCommit=$(GIT_COMMIT)' \
+	-X '$(MODULE)/buildinfo.BuildTime=$(BUILD_TIME)'
 
 # Build output
 BINARY_PATH := $(BUILD_DIR)/$(BINARY_NAME)
@@ -88,7 +88,7 @@ vet: ## Run go vet
 
 lint: ## Run golangci-lint (always uses latest version)
 	@echo "$(GREEN)Running golangci-lint (latest version)...$(NC)"
-	@go run github.com/golangci/golangci-lint/cmd/golangci-lint@latest run ./...
+	@go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run ./...
 
 check: fmt vet lint ## Run all code quality checks (fmt, vet, lint)
 

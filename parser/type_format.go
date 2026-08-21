@@ -1,5 +1,4 @@
-// Package types defines variable type constants used throughout the application.
-package types
+package parser
 
 // Variable type constants for consistent type representation.
 const (

@@ -1,4 +1,4 @@
-package docs
+package document
 
 import (
 	"fmt"
@@ -102,12 +102,12 @@ func HasManagedSection(content, sectionName string) bool {
 // Returns the markers with content, ready to be inserted.
 func CreateManagedSection(sectionName, content string) string {
 	var builder strings.Builder
-	builder.WriteString(fmt.Sprintf("<!-- BEGIN %s -->\n", sectionName))
+	builder.WriteString("<!-- BEGIN " + sectionName + " -->\n")
 	builder.WriteString(content)
 	if !strings.HasSuffix(content, "\n") {
 		builder.WriteString("\n")
 	}
-	builder.WriteString(fmt.Sprintf("<!-- END %s -->", sectionName))
+	builder.WriteString("<!-- END " + sectionName + " -->")
 	return builder.String()
 }
 

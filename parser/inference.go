@@ -6,8 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/saltyorg/docs-automation/internal/config"
-	"github.com/saltyorg/docs-automation/internal/types"
+	"github.com/saltyorg/docs-automation/config"
 )
 
 var (
@@ -91,17 +90,17 @@ func (t *TypeInferrer) inferFromValue(value string) string {
 			trimmedSecond := strings.TrimSpace(secondLine)
 			// Block list starts with -
 			if strings.HasPrefix(trimmedSecond, "-") {
-				return types.List
+				return List
 			}
 			// Block dict has key: value pairs
 			if strings.Contains(trimmedSecond, ":") && !strings.HasPrefix(trimmedSecond, "#") {
-				return types.Dict
+				return Dict
 			}
 		}
 
 		// Block list indicator
 		if strings.HasPrefix(firstLine, "-") {
-			return types.List
+			return List
 		}
 	}
 
@@ -114,17 +113,17 @@ func (t *TypeInferrer) inferFromValue(value string) string {
 
 	// Empty strings (quoted)
 	if trimmedValue == "\"\"" || trimmedValue == "''" {
-		return types.String
+		return String
 	}
 
 	// Boolean literals
 	if boolTrueRe.MatchString(trimmedValue) || boolFalseRe.MatchString(trimmedValue) {
-		return types.Bool
+		return Bool
 	}
 
 	// Integer
 	if intRe.MatchString(trimmedValue) {
-		return types.Int
+		return Int
 	}
 
 	// Float
@@ -134,27 +133,27 @@ func (t *TypeInferrer) inferFromValue(value string) string {
 
 	// List (flow style)
 	if listRe.MatchString(trimmedValue) {
-		return types.List
+		return List
 	}
 
 	// Dict (flow style)
 	if dictRe.MatchString(trimmedValue) {
-		return types.Dict
+		return Dict
 	}
 
 	// Block list (starts with -)
 	if strings.HasPrefix(trimmedValue, "-") || strings.HasPrefix(trimmedValue, "  -") {
-		return types.List
+		return List
 	}
 
 	// Quoted strings or Jinja expressions are strings
 	if strings.HasPrefix(trimmedValue, "\"") || strings.HasPrefix(trimmedValue, "'") ||
 		strings.Contains(trimmedValue, "{{") {
-		return types.String
+		return String
 	}
 
 	// Default: treat as string (matches Python behavior for unknown types)
-	return types.String
+	return String
 }
 
 // inferFromNamePattern infers type from variable name patterns.
@@ -184,18 +183,18 @@ func (t *TypeInferrer) inferFromNamePattern(name string) string {
 		strings.HasSuffix(lower, "_zone") ||
 		strings.HasSuffix(lower, "_token") ||
 		strings.HasSuffix(lower, "_theme") {
-		return types.String
+		return String
 	}
 
 	// Numeric patterns
 	if strings.HasSuffix(lower, "_port") ||
 		strings.HasSuffix(lower, "_timeout") {
-		return types.StringNumber
+		return StringNumber
 	}
 
 	// Scheme pattern
 	if strings.HasSuffix(lower, "_scheme") {
-		return types.StringHTTPHTTPS
+		return StringHTTPHTTPS
 	}
 
 	// List patterns
@@ -207,7 +206,7 @@ func (t *TypeInferrer) inferFromNamePattern(name string) string {
 		strings.HasSuffix(lower, "_devices") ||
 		strings.HasSuffix(lower, "_addons") ||
 		strings.HasSuffix(lower, "_instances") {
-		return types.List
+		return List
 	}
 
 	// Dict patterns
@@ -215,11 +214,11 @@ func (t *TypeInferrer) inferFromNamePattern(name string) string {
 		strings.HasSuffix(lower, "_dict") ||
 		strings.HasSuffix(lower, "_options") ||
 		strings.HasSuffix(lower, "_labels") {
-		return types.Dict
+		return Dict
 	}
 
 	// Default to string
-	return types.String
+	return String
 }
 
 // ExtractRoleVarLookups finds all role_var lookup suffixes in a value.
@@ -241,48 +240,48 @@ func ExtractRoleVarLookups(value string) []string {
 func InferRoleVarType(suffix, line string) string {
 	// Exact suffix matches first (order matters - most specific first)
 	if suffix == "_depends_on_healthchecks" {
-		return types.StringTrueFalse
+		return StringTrueFalse
 	}
 	if suffix == "_depends_on_delay" {
-		return types.StringNumber
+		return StringNumber
 	}
 	if suffix == "_depends_on" {
-		return types.String
+		return String
 	}
 
 	// Pattern matches on suffix
 	if strings.Contains(suffix, "_scheme") {
-		return types.StringHTTPHTTPS
+		return StringHTTPHTTPS
 	}
 	if strings.Contains(suffix, "_enabled") || strings.Contains(suffix, "_proxy") {
-		return types.Bool
+		return Bool
 	}
 	if strings.Contains(suffix, "_domain") || strings.Contains(suffix, "_subdomain") || strings.Contains(suffix, "_url") {
-		return types.String
+		return String
 	}
 	if strings.Contains(suffix, "_port") || strings.Contains(suffix, "_timeout") {
-		return types.StringNumber
+		return StringNumber
 	}
 
 	// Line context checks
 	if strings.Contains(line, "| bool") {
-		return types.Bool
+		return Bool
 	}
 	if defaultQuotedRe.MatchString(line) {
-		return types.String
+		return String
 	}
 	if defaultBoolRe.MatchString(line) {
-		return types.Bool
+		return Bool
 	}
 	if defaultDictOmitRe.MatchString(line) {
-		return types.DictOmit
+		return DictOmit
 	}
 	if defaultListRe.MatchString(line) {
-		return types.List
+		return List
 	}
 
 	// Default to string (matches Python behavior)
-	return types.String
+	return String
 }
 
 // ScanInventoryForRoleVarLookups scans the inventory file for all role_var lookups.
@@ -297,7 +296,7 @@ func ScanInventoryForRoleVarLookups(inventoryPath string, ignoreSuffixes []strin
 		}
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	// Build ignore set for quick lookup
 	ignoreSet := make(map[string]bool)

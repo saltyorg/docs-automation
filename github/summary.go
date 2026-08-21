@@ -1,6 +1,7 @@
 package github
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -83,7 +84,6 @@ func (s *UpdateSummary) WriteGitHubSummary() error {
 	if err != nil {
 		return fmt.Errorf("opening summary file: %w", err)
 	}
-	defer f.Close()
 
 	var sb strings.Builder
 
@@ -93,11 +93,11 @@ func (s *UpdateSummary) WriteGitHubSummary() error {
 	sb.WriteString("### Statistics\n\n")
 	sb.WriteString("| Metric | Count |\n")
 	sb.WriteString("|--------|-------|\n")
-	sb.WriteString(fmt.Sprintf("| Roles Processed | %d |\n", s.TotalRoles))
-	sb.WriteString(fmt.Sprintf("| ✅ Updated | %d |\n", s.Updated))
-	sb.WriteString(fmt.Sprintf("| ➖ Unchanged | %d |\n", s.Unchanged))
-	sb.WriteString(fmt.Sprintf("| ⏭️ Skipped | %d |\n", s.Skipped))
-	sb.WriteString(fmt.Sprintf("| ❌ Errors | %d |\n", s.Errors))
+	fmt.Fprintf(&sb, "| Roles Processed | %d |\n", s.TotalRoles)
+	fmt.Fprintf(&sb, "| ✅ Updated | %d |\n", s.Updated)
+	fmt.Fprintf(&sb, "| ➖ Unchanged | %d |\n", s.Unchanged)
+	fmt.Fprintf(&sb, "| ⏭️ Skipped | %d |\n", s.Skipped)
+	fmt.Fprintf(&sb, "| ❌ Errors | %d |\n", s.Errors)
 	if s.CLIUpdated {
 		sb.WriteString("| 🖥️ CLI Help | Updated |\n")
 	}
@@ -108,9 +108,9 @@ func (s *UpdateSummary) WriteGitHubSummary() error {
 		updatedRoles := s.getRolesByStatus(StatusUpdated)
 		if len(updatedRoles) > 10 {
 			sb.WriteString("<details>\n")
-			sb.WriteString(fmt.Sprintf("<summary><strong>Updated Documentation (%d roles)</strong></summary>\n\n", len(updatedRoles)))
+			fmt.Fprintf(&sb, "<summary><strong>Updated Documentation (%d roles)</strong></summary>\n\n", len(updatedRoles))
 		} else {
-			sb.WriteString(fmt.Sprintf("### Updated Documentation (%d)\n\n", len(updatedRoles)))
+			fmt.Fprintf(&sb, "### Updated Documentation (%d)\n\n", len(updatedRoles))
 		}
 
 		sb.WriteString("| Role | Repository | Sections |\n")
@@ -120,7 +120,7 @@ func (s *UpdateSummary) WriteGitHubSummary() error {
 			if len(r.Sections) > 0 {
 				sections = strings.Join(r.Sections, ", ")
 			}
-			sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", r.Name, r.RepoType, sections))
+			fmt.Fprintf(&sb, "| %s | %s | %s |\n", r.Name, r.RepoType, sections)
 		}
 		sb.WriteString("\n")
 
@@ -133,12 +133,12 @@ func (s *UpdateSummary) WriteGitHubSummary() error {
 	if s.Skipped > 0 {
 		skippedRoles := s.getRolesByStatus(StatusSkipped)
 		sb.WriteString("<details>\n")
-		sb.WriteString(fmt.Sprintf("<summary><strong>Skipped Roles (%d)</strong></summary>\n\n", len(skippedRoles)))
+		fmt.Fprintf(&sb, "<summary><strong>Skipped Roles (%d)</strong></summary>\n\n", len(skippedRoles))
 
 		sb.WriteString("| Role | Repository | Reason |\n")
 		sb.WriteString("|------|------------|--------|\n")
 		for _, r := range skippedRoles {
-			sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", r.Name, r.RepoType, r.SkipReason))
+			fmt.Fprintf(&sb, "| %s | %s | %s |\n", r.Name, r.RepoType, r.SkipReason)
 		}
 		sb.WriteString("\n</details>\n\n")
 	}
@@ -146,14 +146,14 @@ func (s *UpdateSummary) WriteGitHubSummary() error {
 	// Errors
 	if s.Errors > 0 {
 		errorRoles := s.getRolesByStatus(StatusError)
-		sb.WriteString(fmt.Sprintf("### ❌ Errors (%d)\n\n", len(errorRoles)))
+		fmt.Fprintf(&sb, "### ❌ Errors (%d)\n\n", len(errorRoles))
 
 		sb.WriteString("| Role | Repository | Error |\n")
 		sb.WriteString("|------|------------|-------|\n")
 		for _, r := range errorRoles {
 			// Escape pipe characters in error messages
 			errMsg := strings.ReplaceAll(r.Error, "|", "\\|")
-			sb.WriteString(fmt.Sprintf("| %s | %s | %s |\n", r.Name, r.RepoType, errMsg))
+			fmt.Fprintf(&sb, "| %s | %s | %s |\n", r.Name, r.RepoType, errMsg)
 		}
 		sb.WriteString("\n")
 	}
@@ -163,44 +163,45 @@ func (s *UpdateSummary) WriteGitHubSummary() error {
 		sb.WriteString("### 🔍 Coverage Check Results\n\n")
 
 		if len(s.CheckResult.MissingDocs) > 0 {
-			sb.WriteString(fmt.Sprintf("**Missing Documentation:** %d roles\n", len(s.CheckResult.MissingDocs)))
+			fmt.Fprintf(&sb, "**Missing Documentation:** %d roles\n", len(s.CheckResult.MissingDocs))
 			sb.WriteString("<details>\n<summary>Show roles</summary>\n\n")
 			for _, role := range s.CheckResult.MissingDocs {
-				sb.WriteString(fmt.Sprintf("- `%s`\n", role))
+				fmt.Fprintf(&sb, "- `%s`\n", role)
 			}
 			sb.WriteString("\n</details>\n\n")
 		}
 
 		if len(s.CheckResult.MissingSections) > 0 {
-			sb.WriteString(fmt.Sprintf("**Missing Variables Sections:** %d docs\n", len(s.CheckResult.MissingSections)))
+			fmt.Fprintf(&sb, "**Missing Variables Sections:** %d docs\n", len(s.CheckResult.MissingSections))
 			sb.WriteString("<details>\n<summary>Show docs</summary>\n\n")
 			for _, doc := range s.CheckResult.MissingSections {
-				sb.WriteString(fmt.Sprintf("- `%s`\n", doc))
+				fmt.Fprintf(&sb, "- `%s`\n", doc)
 			}
 			sb.WriteString("\n</details>\n\n")
 		}
 
 		if len(s.CheckResult.MissingOverviewSections) > 0 {
-			sb.WriteString(fmt.Sprintf("**Missing Overview Sections:** %d docs\n", len(s.CheckResult.MissingOverviewSections)))
+			fmt.Fprintf(&sb, "**Missing Overview Sections:** %d docs\n", len(s.CheckResult.MissingOverviewSections))
 			sb.WriteString("<details>\n<summary>Show docs</summary>\n\n")
 			for _, doc := range s.CheckResult.MissingOverviewSections {
-				sb.WriteString(fmt.Sprintf("- `%s`\n", doc))
+				fmt.Fprintf(&sb, "- `%s`\n", doc)
 			}
 			sb.WriteString("\n</details>\n\n")
 		}
 
 		if len(s.CheckResult.OrphanedDocs) > 0 {
-			sb.WriteString(fmt.Sprintf("**Orphaned Documentation:** %d docs\n", len(s.CheckResult.OrphanedDocs)))
+			fmt.Fprintf(&sb, "**Orphaned Documentation:** %d docs\n", len(s.CheckResult.OrphanedDocs))
 			sb.WriteString("<details>\n<summary>Show docs</summary>\n\n")
 			for _, doc := range s.CheckResult.OrphanedDocs {
-				sb.WriteString(fmt.Sprintf("- `%s`\n", doc))
+				fmt.Fprintf(&sb, "- `%s`\n", doc)
 			}
 			sb.WriteString("\n</details>\n\n")
 		}
 	}
 
-	_, err = f.WriteString(sb.String())
-	return err
+	_, writeErr := f.WriteString(sb.String())
+	closeErr := f.Close()
+	return errors.Join(writeErr, closeErr)
 }
 
 // getRolesByStatus returns all roles with the given status.

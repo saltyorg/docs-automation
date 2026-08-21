@@ -1,4 +1,4 @@
-package overview
+package render
 
 import (
 	"bytes"
@@ -6,7 +6,7 @@ import (
 	"os"
 	"text/template"
 
-	"github.com/saltyorg/docs-automation/internal/docs"
+	"github.com/saltyorg/docs-automation/document"
 )
 
 // TableGenerator generates overview tables from frontmatter.
@@ -15,10 +15,10 @@ type TableGenerator struct {
 	tmpl         *template.Template
 }
 
-// TableData holds data for the overview table template.
+// TableData holds data for the overview table render.
 type TableData struct {
-	Description *docs.ProjectDescription // Project description
-	Links       []docs.AppLink           // All links passed to template
+	Description *document.ProjectDescription // Project description
+	Links       []document.AppLink           // All links passed to template
 }
 
 // templateFuncs provides helper functions for templates.
@@ -52,7 +52,7 @@ func (g *TableGenerator) LoadTemplate() error {
 
 // Generate creates an overview table from app links in frontmatter.
 // Returns empty string if no app links are defined.
-func (g *TableGenerator) Generate(automation *docs.SaltboxAutomationConfig) (string, error) {
+func (g *TableGenerator) Generate(automation *document.SaltboxAutomationConfig) (string, error) {
 	if automation == nil {
 		return "", nil
 	}
@@ -88,7 +88,7 @@ func (g *TableGenerator) Generate(automation *docs.SaltboxAutomationConfig) (str
 
 // GenerateFromDocument generates an overview table for a document.
 // Returns empty string if document has no frontmatter or no app links.
-func (g *TableGenerator) GenerateFromDocument(doc *docs.Document) (string, error) {
+func (g *TableGenerator) GenerateFromDocument(doc *document.Document) (string, error) {
 	if doc.Frontmatter == nil || doc.Frontmatter.SaltboxAutomation == nil {
 		return "", nil
 	}

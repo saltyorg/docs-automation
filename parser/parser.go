@@ -48,7 +48,7 @@ func (p *Parser) ParseFile(path string) (*RoleInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 
 	role := &RoleInfo{
 		Name:         p.roleName,

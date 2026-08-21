@@ -1,7 +1,8 @@
-package cli
+package clihelp
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -50,13 +51,13 @@ func (g *HelpGenerator) LoadTemplate() error {
 }
 
 // Generate executes the binary with -h flag and formats the output using the template.
-func (g *HelpGenerator) Generate() (string, error) {
+func (g *HelpGenerator) Generate(ctx context.Context) (string, error) {
 	if g.tmpl == nil {
 		return "", fmt.Errorf("template not loaded")
 	}
 
 	// Execute the binary with -h flag
-	cmd := exec.Command(g.binaryPath, "-h")
+	cmd := exec.CommandContext(ctx, g.binaryPath, "-h")
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		// -h often returns exit code 0, but some binaries return non-zero

@@ -1,6 +1,7 @@
 package render
 
 import (
+	"slices"
 	"sort"
 	"strings"
 
@@ -209,6 +210,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document
 
 	// Build DockerInfo if the role has docker variables and a Docker section is shown.
 	if len(roleDockerVars) > 0 && cfg != nil && shouldShowDockerInfo(role, fmConfig) {
+		promoteDockerOverrideGroups(data, cfg, roleDockerVars, typeInfer, fmConfig)
 		data.DockerInfo = buildDockerInfo(cfg, role.Name, roleDockerVars)
 	}
 
@@ -319,17 +321,57 @@ func buildDockerInfo(cfg *config.Config, roleName string, roleDockerVars []strin
 		return nil
 	}
 
-	// Sort for consistent output
-	sort.Strings(additionalVars)
+	additionalSet := make(map[string]bool, len(additionalVars))
+	for _, suffix := range additionalVars {
+		additionalSet[suffix] = true
+	}
+	roleSuffixes := dockerRoleSuffixes(roleName, roleDockerVars)
+	groupedSuffixes := make(map[string]bool)
+	groupCategories := make(map[string]bool)
+	categories := make(map[string][]string)
+	categoryOrder := make([]string, 0, len(cfg.DockerOverrides.Groups)+len(parser.DockerVarCategoryOrder()))
 
-	// Categorize the variables
-	categories := parser.CategorizeDockerVars(additionalVars)
+	for _, group := range cfg.DockerOverrides.Groups {
+		primary := config.NormalizeDockerSuffix(group.Primary)
+		members := dockerOverrideGroupMembers(group)
+		for _, suffix := range members {
+			groupedSuffixes[suffix] = true
+		}
+
+		if roleSuffixes[primary] {
+			continue
+		}
+
+		for _, suffix := range members {
+			if additionalSet[suffix] {
+				categories[group.Name] = append(categories[group.Name], suffix)
+			}
+		}
+		if len(categories[group.Name]) > 0 {
+			groupCategories[group.Name] = true
+			categoryOrder = append(categoryOrder, group.Name)
+		}
+	}
+
+	var ungroupedVars []string
+	for _, suffix := range additionalVars {
+		if !groupedSuffixes[suffix] {
+			ungroupedVars = append(ungroupedVars, suffix)
+		}
+	}
+	sort.Strings(ungroupedVars)
+	for category, suffixes := range parser.CategorizeDockerVars(ungroupedVars) {
+		categories[category] = append(categories[category], suffixes...)
+	}
+	categoryOrder = append(categoryOrder, parser.DockerVarCategoryOrder()...)
 
 	// Only include non-empty categories
 	filteredCategories := make(map[string][]string)
 	for cat, vars := range categories {
 		if len(vars) > 0 {
-			sort.Strings(vars)
+			if !groupCategories[cat] {
+				sort.Strings(vars)
+			}
 			filteredCategories[cat] = vars
 		}
 	}
@@ -364,9 +406,167 @@ func buildDockerInfo(cfg *config.Config, roleName string, roleDockerVars []strin
 
 	return &DockerInfo{
 		Categories:    filteredCategories,
-		CategoryOrder: parser.DockerVarCategoryOrder(),
+		CategoryOrder: categoryOrder,
 		Overrides:     overrides,
 	}
+}
+
+func promoteDockerOverrideGroups(data *RoleData, cfg *config.Config, roleDockerVars []string, typeInfer *parser.TypeInferrer, fmConfig *document.SaltboxAutomationConfig) {
+	section := data.Sections["Docker"]
+	if section == nil {
+		return
+	}
+
+	roleSuffixes := dockerRoleSuffixes(data.RoleName, roleDockerVars)
+	for _, group := range cfg.DockerOverrides.Groups {
+		primary := config.NormalizeDockerSuffix(group.Primary)
+		if !roleSuffixes[primary] {
+			continue
+		}
+
+		members := dockerOverrideGroupMembers(group)
+		existing, location := removeDockerGroupVariables(section, data.RoleName, members, primary)
+		variablePrefix := data.RoleName + "_role_docker_"
+		if primaryVariable := existing[primary]; primaryVariable != nil &&
+			strings.HasPrefix(primaryVariable.Name, data.RoleName+"_docker_") {
+			variablePrefix = data.RoleName + "_docker_"
+		}
+		variables := make([]*VariableData, 0, len(members))
+		for _, suffix := range members {
+			variable := existing[suffix]
+			if variable == nil {
+				variable = buildDockerOverrideVariableData(data.RoleName, data.InstanceName, variablePrefix, suffix, typeInfer, cfg, fmConfig)
+			}
+			variable.Comment = ""
+			variable.CommentLines = nil
+			variables = append(variables, variable)
+		}
+		variables[0].Comment = group.Name
+		variables[0].CommentLines = []string{group.Name}
+
+		insertDockerOverrideGroup(section, group.Name, variables, location)
+	}
+}
+
+type dockerGroupLocation struct {
+	direct          bool
+	index           int
+	subsection      string
+	subsectionIndex int
+}
+
+func removeDockerGroupVariables(section *SectionData, roleName string, members []string, primary string) (map[string]*VariableData, dockerGroupLocation) {
+	memberSet := make(map[string]bool, len(members))
+	for _, member := range members {
+		memberSet[member] = true
+	}
+
+	existing := make(map[string]*VariableData, len(members))
+	location := dockerGroupLocation{index: -1, subsectionIndex: -1}
+	direct := make([]*VariableData, 0, len(section.Variables))
+	for _, variable := range section.Variables {
+		suffix, ok := dockerVariableSuffix(variable.Name, roleName)
+		if !ok || !memberSet[suffix] {
+			direct = append(direct, variable)
+			continue
+		}
+		existing[suffix] = variable
+		if suffix == primary {
+			location.direct = true
+			location.index = len(direct)
+		}
+	}
+	section.Variables = direct
+
+	for _, subsection := range section.SubsectionOrder {
+		filtered := make([]*VariableData, 0, len(section.Subsections[subsection]))
+		for _, variable := range section.Subsections[subsection] {
+			suffix, ok := dockerVariableSuffix(variable.Name, roleName)
+			if !ok || !memberSet[suffix] {
+				filtered = append(filtered, variable)
+				continue
+			}
+			existing[suffix] = variable
+			if suffix == primary && !location.direct {
+				location.subsection = subsection
+				location.subsectionIndex = len(filtered)
+			}
+		}
+		section.Subsections[subsection] = filtered
+	}
+
+	return existing, location
+}
+
+func insertDockerOverrideGroup(section *SectionData, groupName string, variables []*VariableData, location dockerGroupLocation) {
+	if location.direct {
+		location.index = min(location.index, len(section.Variables))
+		section.Variables = slices.Insert(section.Variables, location.index, variables...)
+		return
+	}
+
+	if location.subsection != "" {
+		if location.subsection == groupName {
+			location.subsectionIndex = min(location.subsectionIndex, len(section.Subsections[groupName]))
+			section.Subsections[groupName] = slices.Insert(section.Subsections[groupName], location.subsectionIndex, variables...)
+			return
+		}
+
+		if _, exists := section.Subsections[groupName]; !exists {
+			section.Subsections[groupName] = variables
+			section.SubsectionOrder = insertSubsectionAfter(section.SubsectionOrder, location.subsection, groupName)
+			return
+		}
+		section.Subsections[groupName] = append(section.Subsections[groupName], variables...)
+		return
+	}
+
+	section.Variables = append(section.Variables, variables...)
+}
+
+func buildDockerOverrideVariableData(roleName, instanceName, variablePrefix, suffix string, typeInfer *parser.TypeInferrer, cfg *config.Config, fmConfig *document.SaltboxAutomationConfig) *VariableData {
+	varDef, _ := findDockerOverride(cfg.DockerOverrides.Variables, suffix)
+	rawValue := ""
+	if varDef.Default != nil {
+		rawValue = *varDef.Default
+	}
+	variable := parser.Variable{
+		Name:     variablePrefix + suffix,
+		RawValue: rawValue,
+		Section:  "Docker",
+	}
+	return buildVariableData(&variable, roleName, instanceName, typeInfer, cfg, fmConfig)
+}
+
+func dockerOverrideGroupMembers(group config.DockerOverrideGroup) []string {
+	members := make([]string, 0, len(group.Companions)+1)
+	members = append(members, config.NormalizeDockerSuffix(group.Primary))
+	for _, companion := range group.Companions {
+		members = append(members, config.NormalizeDockerSuffix(companion))
+	}
+	return members
+}
+
+func dockerRoleSuffixes(roleName string, roleDockerVars []string) map[string]bool {
+	suffixes := make(map[string]bool, len(roleDockerVars))
+	for _, variable := range roleDockerVars {
+		if suffix, ok := dockerVariableSuffix(variable, roleName); ok {
+			suffixes[suffix] = true
+		}
+	}
+	return suffixes
+}
+
+func insertSubsectionAfter(order []string, after string, inserted string) []string {
+	for i, name := range order {
+		if name == inserted {
+			return order
+		}
+		if name == after {
+			return slices.Insert(order, i+1, inserted)
+		}
+	}
+	return append(order, inserted)
 }
 
 // buildVariableData creates VariableData from a parsed Variable.

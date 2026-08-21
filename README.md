@@ -92,9 +92,24 @@ Each entry in `variables` is keyed by the `role_var` suffix (for example `_web_h
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `ignore_suffixes` | list | no | Docker+ suffixes to exclude from generated docs |
+| `groups` | list | no | Ordered groups of related Docker override variables |
 | `variables` | map | no | Per-suffix metadata applied to role-defined and Docker+ variables |
 
-Both maps accept either full docker_var-style suffixes (for example `_docker_dev_dri`) or normalized suffixes (for example `dev_dri`). Entries in `variables` use the same `description`, `default`, `type`, and `example` fields as `global_overrides.variables`. Configured descriptions are shown alongside existing role metadata, configured types override inferred types, and configured defaults and examples are used for Docker+ variables that are not defined in the role.
+Suffix references accept either full docker_var-style form (for example `_docker_dev_dri`) or normalized form (for example `dev_dri`). Entries in `variables` use the same `description`, `default`, `type`, and `example` fields as `global_overrides.variables`. Configured descriptions are shown alongside existing role metadata, configured types override inferred types, and configured defaults and examples are used for Docker+ variables that are not defined in the role.
+
+Each `groups` entry defines a presentation group with a `name`, one `primary` suffix, and an ordered `companions` list:
+
+```yaml
+docker_overrides:
+  groups:
+    - name: "GPU"
+      primary: "_docker_gpu_enabled"
+      companions:
+        - "_docker_nvidia_disabled"
+        - "_docker_dev_dri_disabled"
+```
+
+When a role defines the primary variable, the complete group is shown in the role's Docker section using role-defined values where available and configured defaults for missing companions. Otherwise, the complete group is shown in Docker+. Group members are rendered once in primary-then-companions order and are removed from the standard Docker+ categories.
 
 ### type_inference
 

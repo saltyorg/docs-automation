@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/saltyorg/docs-automation/config"
 	"go.yaml.in/yaml/v3"
 )
 
@@ -143,7 +144,7 @@ func (s *DockerVarScanner) GetDockerVarSuffixes(roleName string, roleDockerVars,
 	// - "dev_dri" (docker-specific suffix)
 	ignoreSet := make(map[string]bool)
 	for _, suffix := range ignoreSuffixes {
-		normalized := NormalizeDockerSuffix(suffix)
+		normalized := config.NormalizeDockerSuffix(suffix)
 		if normalized != "" {
 			ignoreSet[normalized] = true
 		}
@@ -169,10 +170,7 @@ func (s *DockerVarScanner) GetDockerVarSuffixes(roleName string, roleDockerVars,
 // - "dev_dri" -> "dev_dri"
 // - "_dev_dri" -> "dev_dri"
 func NormalizeDockerSuffix(suffix string) string {
-	normalized := strings.TrimSpace(suffix)
-	normalized = strings.TrimPrefix(normalized, "_docker_")
-	normalized = strings.TrimPrefix(normalized, "_")
-	return normalized
+	return config.NormalizeDockerSuffix(suffix)
 }
 
 // CategorizeDockerVars groups docker variable suffixes into categories.

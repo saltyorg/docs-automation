@@ -147,3 +147,227 @@ func TestFindDockerOverrideAcceptsFullAndNormalizedSuffixes(t *testing.T) {
 		t.Fatalf("normalized suffix lookup = %#v, %v; want normalized metadata", got, ok)
 	}
 }
+
+func TestBuildRoleDataPromotesCompleteDockerOverrideGroup(t *testing.T) {
+	tests := []struct {
+		name         string
+		primaryValue string
+	}{
+		{name: "primary enabled", primaryValue: "true"},
+		{name: "primary disabled", primaryValue: "false"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			variables := []parser.Variable{
+				{Name: "plex_role_docker_container", RawValue: `"plex"`, Section: "Docker", Comment: "Container"},
+				{Name: "plex_role_docker_gpu_enabled", RawValue: tt.primaryValue, Section: "Docker", Comment: "GPU"},
+				{Name: "plex_role_docker_image", RawValue: `"plex:latest"`, Section: "Docker", Comment: "Image"},
+			}
+			if tt.primaryValue == "true" {
+				variables = append(variables, parser.Variable{
+					Name:     "plex_role_docker_nvidia_disabled",
+					RawValue: "true",
+					Section:  "Docker",
+				})
+			}
+
+			role := dockerTestRole("plex", variables)
+			role.HasInstances = true
+			role.InstancesVar = "plex_instances"
+			cfg := dockerGroupTestConfig("")
+			data := BuildRoleData(role, cfg, nil)
+			got := data.Sections["Docker"].Variables
+
+			wantNames := []string{
+				"plex_role_docker_container",
+				"plex_role_docker_gpu_enabled",
+				"plex_role_docker_nvidia_disabled",
+				"plex_role_docker_dev_dri_disabled",
+				"plex_role_docker_image",
+			}
+			if names := variableNames(got); !slices.Equal(names, wantNames) {
+				t.Fatalf("variable order = %v, want %v", names, wantNames)
+			}
+			if got[1].Comment != "GPU" || !slices.Equal(got[1].CommentLines, []string{"GPU"}) {
+				t.Fatalf("primary heading = %q, %v; want GPU", got[1].Comment, got[1].CommentLines)
+			}
+			if got[2].Comment != "" || got[3].Comment != "" {
+				t.Fatalf("companion comments = %q, %q; want empty", got[2].Comment, got[3].Comment)
+			}
+			if got[1].RawValue != tt.primaryValue {
+				t.Fatalf("primary value = %q, want %q", got[1].RawValue, tt.primaryValue)
+			}
+			wantNvidia := "false"
+			if tt.primaryValue == "true" {
+				wantNvidia = "true"
+			}
+			if got[2].RawValue != wantNvidia {
+				t.Fatalf("NVIDIA opt-out value = %q, want %q", got[2].RawValue, wantNvidia)
+			}
+			if got[3].RawValue != "false" {
+				t.Fatalf("DRI opt-out value = %q, want false", got[3].RawValue)
+			}
+			if got[1].InstanceName != "plex2_docker_gpu_enabled" ||
+				got[2].InstanceName != "plex2_docker_nvidia_disabled" ||
+				got[3].InstanceName != "plex2_docker_dev_dri_disabled" {
+				t.Fatalf("instance names = %q, %q, %q", got[1].InstanceName, got[2].InstanceName, got[3].InstanceName)
+			}
+		})
+	}
+}
+
+func TestBuildRoleDataPlacesCompleteGroupInDockerPlusWhenPrimaryIsAbsent(t *testing.T) {
+	root := writeDockerScannerFixture(t, []string{
+		"gpu_enabled",
+		"nvidia_disabled",
+		"dev_dri_disabled",
+		"custom_option",
+	})
+	cfg := dockerGroupTestConfig(root)
+	role := dockerTestRole("example", []parser.Variable{{
+		Name:     "example_role_docker_container",
+		RawValue: `"example"`,
+		Section:  "Docker",
+		Comment:  "Container",
+	}})
+
+	data := BuildRoleData(role, cfg, nil)
+	if data.DockerInfo == nil {
+		t.Fatal("DockerInfo is nil")
+	}
+	wantGPU := []string{"gpu_enabled", "nvidia_disabled", "dev_dri_disabled"}
+	if got := data.DockerInfo.Categories["GPU"]; !slices.Equal(got, wantGPU) {
+		t.Fatalf("GPU category = %v, want %v", got, wantGPU)
+	}
+	if len(data.DockerInfo.CategoryOrder) == 0 || data.DockerInfo.CategoryOrder[0] != "GPU" {
+		t.Fatalf("category order = %v, want GPU first", data.DockerInfo.CategoryOrder)
+	}
+	if got := data.DockerInfo.Categories["Other Options"]; !slices.Equal(got, []string{"custom_option"}) {
+		t.Fatalf("other options = %v, want custom_option", got)
+	}
+	if len(data.Sections["Docker"].Variables) != 1 {
+		t.Fatalf("Docker variables = %v, want only role-defined container", variableNames(data.Sections["Docker"].Variables))
+	}
+}
+
+func TestBuildRoleDataRemovesPromotedGroupFromDockerPlus(t *testing.T) {
+	root := writeDockerScannerFixture(t, []string{
+		"gpu_enabled",
+		"nvidia_disabled",
+		"dev_dri_disabled",
+		"custom_option",
+	})
+	cfg := dockerGroupTestConfig(root)
+	role := dockerTestRole("plex", []parser.Variable{
+		{Name: "plex_role_docker_gpu_enabled", RawValue: "true", Section: "Docker", Comment: "GPU"},
+		{Name: "plex_role_docker_container", RawValue: `"plex"`, Section: "Docker", Comment: "Container"},
+	})
+
+	data := BuildRoleData(role, cfg, nil)
+	if data.DockerInfo == nil {
+		t.Fatal("DockerInfo is nil")
+	}
+	if _, exists := data.DockerInfo.Categories["GPU"]; exists {
+		t.Fatalf("Docker+ categories = %v, want no GPU category", data.DockerInfo.Categories)
+	}
+	for category, suffixes := range data.DockerInfo.Categories {
+		for _, suffix := range suffixes {
+			if slices.Contains([]string{"gpu_enabled", "nvidia_disabled", "dev_dri_disabled"}, suffix) {
+				t.Fatalf("%s contains promoted suffix %q", category, suffix)
+			}
+		}
+	}
+	if got := variableNames(data.Sections["Docker"].Variables); !slices.Equal(got[:3], []string{
+		"plex_role_docker_gpu_enabled",
+		"plex_role_docker_nvidia_disabled",
+		"plex_role_docker_dev_dri_disabled",
+	}) {
+		t.Fatalf("promoted variables = %v", got)
+	}
+}
+
+func TestBuildDockerInfoUsesConfiguredGroupWithoutGPUNames(t *testing.T) {
+	root := writeDockerScannerFixture(t, []string{"accelerator_enabled", "accelerator_mode"})
+	defaultValue := "false"
+	cfg := &config.Config{
+		Repositories: config.RepositoryConfig{Saltbox: root},
+		DockerOverrides: config.DockerOverrides{
+			Groups: []config.DockerOverrideGroup{{
+				Name:       "Acceleration",
+				Primary:    "_docker_accelerator_enabled",
+				Companions: []string{"_docker_accelerator_mode"},
+			}},
+			Variables: map[string]config.OverrideVarDef{
+				"_docker_accelerator_enabled": {Default: &defaultValue, Type: "bool"},
+				"_docker_accelerator_mode":    {Type: "string"},
+			},
+		},
+	}
+
+	info := buildDockerInfo(cfg, "example", nil)
+	if info == nil {
+		t.Fatal("DockerInfo is nil")
+	}
+	want := []string{"accelerator_enabled", "accelerator_mode"}
+	if got := info.Categories["Acceleration"]; !slices.Equal(got, want) {
+		t.Fatalf("Acceleration category = %v, want %v", got, want)
+	}
+}
+
+func dockerGroupTestConfig(root string) *config.Config {
+	defaultValue := "false"
+	return &config.Config{
+		Repositories: config.RepositoryConfig{Saltbox: root},
+		DockerOverrides: config.DockerOverrides{
+			Groups: []config.DockerOverrideGroup{{
+				Name:       "GPU",
+				Primary:    "_docker_gpu_enabled",
+				Companions: []string{"_docker_nvidia_disabled", "_docker_dev_dri_disabled"},
+			}},
+			Variables: map[string]config.OverrideVarDef{
+				"_docker_gpu_enabled":      {Description: "Enable GPU access", Default: &defaultValue, Type: "bool"},
+				"_docker_nvidia_disabled":  {Description: "Disable NVIDIA access", Default: &defaultValue, Type: "bool"},
+				"_docker_dev_dri_disabled": {Description: "Disable DRI access", Default: &defaultValue, Type: "bool"},
+			},
+		},
+	}
+}
+
+func dockerTestRole(name string, variables []parser.Variable) *parser.RoleInfo {
+	return &parser.RoleInfo{
+		Name:         name,
+		RepoType:     "saltbox",
+		HasDocker:    true,
+		SectionOrder: []string{"Docker"},
+		Sections: map[string]*parser.Section{
+			"Docker": {Name: "Docker", Variables: variables},
+		},
+		AllVariables: variables,
+	}
+}
+
+func writeDockerScannerFixture(t *testing.T, suffixes []string) string {
+	t.Helper()
+	root := t.TempDir()
+	tasksDir := filepath.Join(root, "resources", "tasks", "docker")
+	if err := os.MkdirAll(tasksDir, 0o755); err != nil {
+		t.Fatalf("creating Docker task directory: %v", err)
+	}
+	content := "---\n- name: Test Docker variables\n  vars:\n    _docker_var_specs:\n"
+	for _, suffix := range suffixes {
+		content += "      _docker_" + suffix + ":\n        omit: true\n"
+	}
+	if err := os.WriteFile(filepath.Join(tasksDir, "create.yml"), []byte(content), 0o644); err != nil {
+		t.Fatalf("writing Docker task fixture: %v", err)
+	}
+	return root
+}
+
+func variableNames(variables []*VariableData) []string {
+	names := make([]string, 0, len(variables))
+	for _, variable := range variables {
+		names = append(names, variable.Name)
+	}
+	return names
+}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -49,7 +50,15 @@ type GlobalOverrides struct {
 // DockerOverrides configures Docker+ docs generation overrides.
 type DockerOverrides struct {
 	IgnoreSuffixes []string                  `yaml:"ignore_suffixes"`
+	Groups         []DockerOverrideGroup     `yaml:"groups"`
 	Variables      map[string]OverrideVarDef `yaml:"variables"`
+}
+
+// DockerOverrideGroup keeps related Docker override variables together in generated docs.
+type DockerOverrideGroup struct {
+	Name       string   `yaml:"name"`
+	Primary    string   `yaml:"primary"`
+	Companions []string `yaml:"companions"`
 }
 
 // OverrideVarDef defines reusable override metadata.
@@ -133,6 +142,9 @@ func (c *Config) Validate() error {
 	if c.Markers.Variables == "" {
 		return fmt.Errorf("markers.variables is required")
 	}
+	if err := validateDockerOverrideGroups(c.DockerOverrides.Groups); err != nil {
+		return err
+	}
 
 	// Validate repository directories exist
 	if err := validateDirectory(c.Repositories.Saltbox, "repositories.saltbox"); err != nil {
@@ -154,6 +166,58 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+func validateDockerOverrideGroups(groups []DockerOverrideGroup) error {
+	groupNames := make(map[string]bool)
+	members := make(map[string]string)
+
+	for i, group := range groups {
+		name := strings.TrimSpace(group.Name)
+		if name == "" {
+			return fmt.Errorf("docker_overrides.groups[%d].name is required", i)
+		}
+		nameKey := strings.ToLower(name)
+		if groupNames[nameKey] {
+			return fmt.Errorf("docker_overrides group name %q is duplicated", name)
+		}
+		groupNames[nameKey] = true
+
+		primary := NormalizeDockerSuffix(group.Primary)
+		if primary == "" {
+			return fmt.Errorf("docker_overrides group %q primary is required", name)
+		}
+
+		groupMembers := make(map[string]bool)
+		for memberIndex, member := range append([]string{group.Primary}, group.Companions...) {
+			normalized := NormalizeDockerSuffix(member)
+			if normalized == "" {
+				return fmt.Errorf("docker_overrides group %q member %d is empty", name, memberIndex)
+			}
+			if groupMembers[normalized] {
+				if normalized == primary {
+					return fmt.Errorf("docker_overrides group %q repeats primary %q as a companion", name, group.Primary)
+				}
+				return fmt.Errorf("docker_overrides group %q repeats member %q", name, member)
+			}
+			groupMembers[normalized] = true
+
+			if existingGroup, exists := members[normalized]; exists {
+				return fmt.Errorf("docker override %q belongs to both %q and %q groups", member, existingGroup, name)
+			}
+			members[normalized] = name
+		}
+	}
+
+	return nil
+}
+
+// NormalizeDockerSuffix converts supported Docker override suffix forms to Docker+ form.
+func NormalizeDockerSuffix(suffix string) string {
+	normalized := strings.TrimSpace(suffix)
+	normalized = strings.TrimPrefix(normalized, "_docker_")
+	normalized = strings.TrimPrefix(normalized, "_")
+	return normalized
 }
 
 // validateDirectory checks that a path exists and is a directory.

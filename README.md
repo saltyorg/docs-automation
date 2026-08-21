@@ -82,7 +82,7 @@ Each entry in `variables` is keyed by the `role_var` suffix (for example `_web_h
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `description` | string | no | Text shown in generated docs |
+| `description` | string | no | Text shown in generated docs; supports YAML block scalars for multiple lines |
 | `default` | string or null | no | Default value; `null` means "no default shown" |
 | `type` | string | no | Override type label for docs |
 | `example` | string | no | Example snippet for docs (supports block scalars) |

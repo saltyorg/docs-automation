@@ -11,9 +11,10 @@ import (
 func FuncMap() template.FuncMap {
 	return template.FuncMap{
 		// Formatting functions
-		"indent":            indent,
-		"formatTypeComment": formatTypeComment,
-		"typeKeyword":       typeKeyword,
+		"indent":                   indent,
+		"formatDescriptionComment": formatDescriptionComment,
+		"formatTypeComment":        formatTypeComment,
+		"typeKeyword":              typeKeyword,
 
 		// Role variable functions
 		"renderMultilineValueAdjusted": renderMultilineValueAdjusted,
@@ -29,6 +30,20 @@ func FuncMap() template.FuncMap {
 		"replacePlural":         replacePlural,
 		"formatOverrideDefault": formatOverrideDefault,
 	}
+}
+
+// formatDescriptionComment formats each description line as a YAML comment.
+func formatDescriptionComment(description string) string {
+	lines := strings.Split(strings.TrimSpace(description), "\n")
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			lines[i] = "#"
+			continue
+		}
+		lines[i] = "# " + line
+	}
+	return strings.Join(lines, "\n")
 }
 
 // indent adds n spaces of indentation to each line.

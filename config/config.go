@@ -11,16 +11,17 @@ import (
 
 // Config represents the complete configuration for docs automation.
 type Config struct {
-	Repositories    RepositoryConfig             `yaml:"repositories"`
-	Blacklist       BlacklistConfig              `yaml:"blacklist"`
-	PathOverrides   map[string]map[string]string `yaml:"path_overrides"`
-	GlobalOverrides GlobalOverrides              `yaml:"global_overrides"`
-	DockerOverrides DockerOverrides              `yaml:"docker_overrides"`
-	TypeInference   TypeInferenceConfig          `yaml:"type_inference"`
-	DockerVariables DockerVariables              `yaml:"docker_variables"`
-	CLIHelp         CLIHelpConfig                `yaml:"cli_help"`
-	Markers         MarkersConfig                `yaml:"markers"`
-	Scaffold        ScaffoldConfig               `yaml:"scaffold"`
+	Repositories      RepositoryConfig             `yaml:"repositories"`
+	Blacklist         BlacklistConfig              `yaml:"blacklist"`
+	PathOverrides     map[string]map[string]string `yaml:"path_overrides"`
+	GlobalOverrides   GlobalOverrides              `yaml:"global_overrides"`
+	DockerOverrides   DockerOverrides              `yaml:"docker_overrides"`
+	SectionExplainers map[string]string            `yaml:"section_explainers"`
+	TypeInference     TypeInferenceConfig          `yaml:"type_inference"`
+	DockerVariables   DockerVariables              `yaml:"docker_variables"`
+	CLIHelp           CLIHelpConfig                `yaml:"cli_help"`
+	Markers           MarkersConfig                `yaml:"markers"`
+	Scaffold          ScaffoldConfig               `yaml:"scaffold"`
 }
 
 // RepositoryConfig defines paths to the repositories.

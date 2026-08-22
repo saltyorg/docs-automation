@@ -6,6 +6,25 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+func TestSectionExplainersParse(t *testing.T) {
+	const input = `
+section_explainers:
+  Ports: |-
+    Ports are assigned automatically.
+    Explicit conflicts always fail.
+`
+
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("unmarshalling section explainers: %v", err)
+	}
+
+	want := "Ports are assigned automatically.\nExplicit conflicts always fail."
+	if got := cfg.SectionExplainers["Ports"]; got != want {
+		t.Fatalf("Ports explainer = %q, want %q", got, want)
+	}
+}
+
 func TestDockerOverridesRemainBackwardCompatible(t *testing.T) {
 	const input = `
 docker_overrides:

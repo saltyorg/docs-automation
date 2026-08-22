@@ -48,6 +48,7 @@ type RoleData struct {
 // SectionData represents a section for template rendering.
 type SectionData struct {
 	Name            string
+	Explainer       string
 	Variables       []*VariableData
 	Subsections     map[string][]*VariableData
 	SubsectionOrder []string
@@ -144,6 +145,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document
 		if fmConfig == nil || fmConfig.ShouldShowSection(sectionName) {
 			sectionData := &SectionData{
 				Name:            sectionName,
+				Explainer:       sectionExplainer(cfg, sectionName),
 				Variables:       make([]*VariableData, 0),
 				Subsections:     make(map[string][]*VariableData),
 				SubsectionOrder: []string{},
@@ -176,6 +178,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document
 
 			sectionData := &SectionData{
 				Name:            sectionName,
+				Explainer:       sectionExplainer(cfg, sectionName),
 				Variables:       make([]*VariableData, 0),
 				Subsections:     make(map[string][]*VariableData),
 				SubsectionOrder: section.SubsectionOrder,
@@ -567,6 +570,13 @@ func insertSubsectionAfter(order []string, after string, inserted string) []stri
 		}
 	}
 	return append(order, inserted)
+}
+
+func sectionExplainer(cfg *config.Config, sectionName string) string {
+	if cfg == nil {
+		return ""
+	}
+	return strings.TrimSpace(cfg.SectionExplainers[sectionName])
 }
 
 // buildVariableData creates VariableData from a parsed Variable.

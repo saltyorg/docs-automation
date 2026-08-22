@@ -29,6 +29,17 @@ Application code does not use an `internal/` hierarchy, and workflow logic does 
 
 `sb-docs` loads `config.yml` by default. Override the path with `--config`.
 
+Section introductions can be reused across roles with `section_explainers`. Keys match the
+section names parsed from role defaults, and values support multiline Markdown:
+
+```yaml
+section_explainers:
+  Ports: |-
+    Ports in this section are assigned automatically and retained for future runs.
+    Low and high bounds limit automatic allocation only.
+    A specifically configured port always fails on conflict.
+```
+
 ### Top-Level Fields
 
 | Field | Type | Required | Description |
@@ -38,6 +49,7 @@ Application code does not use an `internal/` hierarchy, and workflow logic does 
 | `path_overrides` | map | no | Per-repo overrides for documentation file paths |
 | `global_overrides` | object | no | Metadata for `role_var` overrides (inventory scan + docs) |
 | `docker_overrides` | object | no | Overrides for Docker+ variable discovery in generated docs |
+| `section_explainers` | map | no | Reusable Markdown introductions keyed by defaults section name |
 | `type_inference` | object | no | Variable type inference rules |
 | `docker_variables` | object | no | Docker variable suffix lists by type |
 | `cli_help` | object | no | CLI help generation settings |
@@ -86,6 +98,12 @@ Each entry in `variables` is keyed by the `role_var` suffix (for example `_web_h
 | `default` | string or null | no | Default value; `null` means "no default shown" |
 | `type` | string | no | Override type label for docs |
 | `example` | string | no | Example snippet for docs (supports block scalars) |
+
+### section_explainers
+
+Each key exactly matches a section heading parsed from `defaults/main.yml`. The configured
+Markdown is rendered once beneath that section tab for every matching role. Variables remain
+owned and documented by their role; this only supplies the shared section introduction.
 
 ### docker_overrides
 

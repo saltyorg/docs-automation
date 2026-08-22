@@ -69,6 +69,41 @@ func TestBuildRoleDataAppliesDockerOverrideMetadata(t *testing.T) {
 	}
 }
 
+func TestBuildRoleDataAppliesSectionExplainer(t *testing.T) {
+	variable := parser.Variable{
+		Name:     "example_role_port_conflict_policy",
+		RawValue: `"fail"`,
+		Section:  "Ports",
+	}
+	role := &parser.RoleInfo{
+		Name:         "example",
+		RepoType:     "saltbox",
+		SectionOrder: []string{"Ports"},
+		Sections: map[string]*parser.Section{
+			"Ports": {
+				Name:      "Ports",
+				Variables: []parser.Variable{variable},
+			},
+		},
+		AllVariables: []parser.Variable{variable},
+	}
+	cfg := &config.Config{
+		SectionExplainers: map[string]string{
+			"Ports": "  Ports stay stable across runs.\n\n  Explicit conflicts always fail.  ",
+		},
+	}
+
+	data := BuildRoleData(role, cfg, nil)
+	if got, want := data.Sections["Ports"].Explainer, "Ports stay stable across runs.\n\n  Explicit conflicts always fail."; got != want {
+		t.Fatalf("Ports explainer = %q, want %q", got, want)
+	}
+
+	legacyData := BuildRoleData(role, &config.Config{}, nil)
+	if got := legacyData.Sections["Ports"].Explainer; got != "" {
+		t.Fatalf("legacy Ports explainer = %q, want empty", got)
+	}
+}
+
 func TestBuildDockerInfoPreservesUnconfiguredVariablesAndAddsMetadata(t *testing.T) {
 	root := t.TempDir()
 	tasksDir := filepath.Join(root, "resources", "tasks", "docker")

@@ -137,6 +137,11 @@ When a role defines the primary variable, the complete group is shown in the rol
 | `overrides` | map | no | Additional suffix overrides checked after `exact` |
 | `patterns` | list | no | Pattern rules matched by substring |
 
+Value inference recognizes native YAML literals and conservative collection evidence in pure Jinja
+expressions. A complete dictionary or list literal is inferred as `dict` or `list`; a Jinja conditional
+is inferred only when both branches prove the same collection type. Expressions that depend on
+variables, lookups, or filters keep the existing string fallback unless an explicit type rule applies.
+
 Each `patterns` entry includes:
 
 | Field | Type | Required | Description |

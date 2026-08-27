@@ -146,6 +146,11 @@ func (t *TypeInferrer) inferFromValue(value string) string {
 		return List
 	}
 
+	// Pure Jinja expressions can preserve native collection types in Ansible.
+	if typ, ok := inferJinjaCollectionType(trimmedValue); ok {
+		return typ
+	}
+
 	// Quoted strings or Jinja expressions are strings
 	if strings.HasPrefix(trimmedValue, "\"") || strings.HasPrefix(trimmedValue, "'") ||
 		strings.Contains(trimmedValue, "{{") {

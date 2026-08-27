@@ -237,6 +237,9 @@ func (c *Config) Validate() error {
 	if err := validateDockerOverrideGroups(c.DockerOverrides.Groups); err != nil {
 		return err
 	}
+	if err := validateDockerVariableTypes(c.DockerVariables); err != nil {
+		return err
+	}
 
 	// Validate repository directories exist
 	if err := validateDirectory(c.Repositories.Saltbox, "repositories.saltbox"); err != nil {
@@ -257,6 +260,31 @@ func (c *Config) Validate() error {
 		return err
 	}
 
+	return nil
+}
+
+func validateDockerVariableTypes(variables DockerVariables) error {
+	owners := make(map[string]string)
+	for _, group := range []struct {
+		typ      string
+		suffixes []string
+	}{
+		{typ: "bool", suffixes: variables.Bool},
+		{typ: "int", suffixes: variables.Int},
+		{typ: "list", suffixes: variables.List},
+		{typ: "dict", suffixes: variables.Dict},
+	} {
+		for _, suffix := range group.suffixes {
+			normalized := NormalizeDockerSuffix(suffix)
+			if normalized == "" {
+				return fmt.Errorf("docker_variables.%s contains an empty suffix", group.typ)
+			}
+			if owner, exists := owners[normalized]; exists {
+				return fmt.Errorf("docker variable %q belongs to both %s and %s type groups", suffix, owner, group.typ)
+			}
+			owners[normalized] = group.typ
+		}
+	}
 	return nil
 }
 

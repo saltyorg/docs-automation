@@ -286,6 +286,23 @@ func TestBuildRoleDataPlacesCompleteGroupInDockerPlusWhenPrimaryIsAbsent(t *test
 	}
 }
 
+func TestBuildRoleDataUsesConfiguredDockerVariableType(t *testing.T) {
+	root := writeDockerScannerFixture(t, []string{"sysctls"})
+	cfg := dockerGroupTestConfig(root)
+	cfg.DockerVariables.Dict = []string{"sysctls"}
+	role := dockerTestRole("example", []parser.Variable{
+		{Name: "example_role_docker_container", RawValue: `"example"`, Section: "Docker"},
+	})
+
+	data := BuildRoleData(role, cfg, nil)
+	if data.DockerInfo == nil {
+		t.Fatal("BuildRoleData() DockerInfo is nil")
+	}
+	if got := data.DockerInfo.Types["sysctls"]; got != parser.Dict {
+		t.Fatalf("BuildRoleData() sysctls type = %q, want %q", got, parser.Dict)
+	}
+}
+
 func TestBuildRoleDataRemovesPromotedGroupFromDockerPlus(t *testing.T) {
 	root := writeDockerScannerFixture(t, []string{
 		"gpu_enabled",

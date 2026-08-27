@@ -89,6 +89,7 @@ type VariableData struct {
 type DockerInfo struct {
 	Categories    map[string][]string // category -> list of var suffixes
 	CategoryOrder []string
+	Types         map[string]string             // normalized suffix -> configured type
 	Overrides     map[string]*GlobalOverrideVar // normalized suffix -> configured metadata
 }
 
@@ -385,7 +386,9 @@ func buildDockerInfo(cfg *config.Config, roleName string, roleDockerVars []strin
 	}
 
 	overrides := make(map[string]*GlobalOverrideVar)
+	types := make(map[string]string, len(additionalVars))
 	for _, suffix := range additionalVars {
+		types[suffix] = configuredDockerVariableType(cfg, suffix)
 		varDef, exists := findDockerOverride(cfg.DockerOverrides.Variables, suffix)
 		if !exists {
 			continue
@@ -393,7 +396,9 @@ func buildDockerInfo(cfg *config.Config, roleName string, roleDockerVars []strin
 
 		varType := varDef.Type
 		if varType == "" {
-			varType = parser.GetDockerVarType(suffix)
+			varType = types[suffix]
+		} else {
+			types[suffix] = varType
 		}
 		overrideVar := &GlobalOverrideVar{
 			Suffix:      suffix,
@@ -411,8 +416,26 @@ func buildDockerInfo(cfg *config.Config, roleName string, roleDockerVars []strin
 	return &DockerInfo{
 		Categories:    filteredCategories,
 		CategoryOrder: categoryOrder,
+		Types:         types,
 		Overrides:     overrides,
 	}
+}
+
+func configuredDockerVariableType(cfg *config.Config, suffix string) string {
+	normalized := config.NormalizeDockerSuffix(suffix)
+	for typ, suffixes := range map[string][]string{
+		parser.Bool: cfg.DockerVariables.Bool,
+		parser.Int:  cfg.DockerVariables.Int,
+		parser.List: cfg.DockerVariables.List,
+		parser.Dict: cfg.DockerVariables.Dict,
+	} {
+		for _, configuredSuffix := range suffixes {
+			if config.NormalizeDockerSuffix(configuredSuffix) == normalized {
+				return typ
+			}
+		}
+	}
+	return parser.String
 }
 
 func promoteDockerOverrideGroups(data *RoleData, cfg *config.Config, roleDockerVars []string, typeInfer *parser.TypeInferrer, fmConfig *document.SaltboxAutomationConfig) {

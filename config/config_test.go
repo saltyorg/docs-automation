@@ -412,3 +412,14 @@ func TestValidateDockerOverrideGroups(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateDockerVariableTypesRejectsDuplicateSuffix(t *testing.T) {
+	variables := DockerVariables{
+		List: []string{"sysctls"},
+		Dict: []string{"_docker_sysctls"},
+	}
+
+	if err := validateDockerVariableTypes(variables); err == nil {
+		t.Fatal("validateDockerVariableTypes() error is nil, want duplicate suffix error")
+	}
+}

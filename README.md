@@ -179,6 +179,10 @@ Each `patterns` entry includes:
 | `list` | list | no | Docker variables treated as lists |
 | `dict` | list | no | Docker variables treated as dictionaries |
 
+These configured groups are authoritative for Docker+ rendering. A normalized suffix may appear in
+only one group; unlisted Docker variables fall back to `string`. Per-variable `docker_overrides` types
+take precedence when a constrained or more specific label is needed.
+
 ### cli_help
 
 | Field | Type | Required | Description |

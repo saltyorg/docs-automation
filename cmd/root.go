@@ -44,7 +44,7 @@ It performs the following core functions:
 		SilenceErrors: true,
 	}
 	rootCmd.SetVersionTemplate("{{.Version}}\n")
-	rootCmd.PersistentFlags().StringVar(&opts.configPath, "config", "config.yml", "config file path")
+	rootCmd.PersistentFlags().StringVar(&opts.configPath, "config", "config.yml", "full config or path-only overlay file")
 	rootCmd.PersistentFlags().BoolVarP(&opts.verbose, "verbose", "v", false, "enable verbose output")
 	rootCmd.AddCommand(
 		newCLICommand(opts, deps),

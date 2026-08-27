@@ -1,6 +1,6 @@
 # Saltbox Automation Front-Matter Format
 
-This document describes the YAML front-matter format used by the docs-automation tool to generate documentation sections, plus the tool's `config.yml`.
+This document describes the YAML front-matter format used by the docs-automation tool to generate documentation sections, plus its configuration files.
 
 ## Overview
 
@@ -8,9 +8,9 @@ The `saltbox_automation` block is added to the YAML front-matter of markdown doc
 
 There are two distinct configuration surfaces:
 1. Front-matter: per-document settings under `saltbox_automation`.
-2. Config file: global tool settings in `config.yml` (or `--config`).
+2. Config file: global tool settings in a canonical config selected by `config.yml` or `--config`.
 
-The CLI reads `config.yml` for repository paths, templates, markers, and type inference settings. The section below documents all configuration options.
+The CLI reads either a full canonical config or a path-only local overlay that extends one canonical config. The section below documents both forms.
 
 ## Architecture
 
@@ -28,6 +28,23 @@ Application code does not use an `internal/` hierarchy, and workflow logic does 
 ## Configuration File (`config.yml`)
 
 `sb-docs` loads `config.yml` by default. Override the path with `--config`.
+
+For local development, keep behavior in the canonical docs config and make the ignored `config.yml`
+contain only an extension reference plus repository paths:
+
+```yaml
+extends: ../docs/.docs-automation.yml
+
+repositories:
+  saltbox: /srv/git/saltbox
+  sandbox: /opt/sandbox
+  docs: /opt/git/docs
+```
+
+The `extends` path is resolved relative to the overlay file, not the process working directory. The
+overlay may replace any subset of the three repository paths, but it cannot contain behavioral keys.
+Nested or self-referential extensions are rejected. The merged configuration is validated only after
+the local paths are applied, allowing the canonical file to retain its CI-relative repository layout.
 
 Section introductions can be reused across roles with `section_explainers`. Keys match the
 section names parsed from role defaults, and values support multiline Markdown:

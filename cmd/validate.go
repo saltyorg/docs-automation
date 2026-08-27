@@ -23,8 +23,8 @@ func newValidateCommand(rootOpts *rootOptions, deps dependencies) *cobra.Command
 func newValidateConfigCommand(rootOpts *rootOptions, deps dependencies) *cobra.Command {
 	return &cobra.Command{
 		Use:   "config",
-		Short: "Validate config.yml",
-		Long:  "Validate the configuration file for required fields and correct format.",
+		Short: "Validate configuration",
+		Long:  "Validate a full configuration file or path-only local overlay.",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if _, err := deps.loadConfig(rootOpts.configPath); err != nil {

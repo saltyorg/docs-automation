@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -75,6 +76,8 @@ type TypeInferenceConfig struct {
 	Exact     map[string]string `yaml:"exact"`
 	Patterns  []TypePattern     `yaml:"patterns"`
 	Overrides map[string]string `yaml:"overrides"`
+	Filters   map[string]string `yaml:"filters"`
+	Symbols   map[string]string `yaml:"symbols"`
 }
 
 // TypePattern defines a pattern-based type inference rule.
@@ -109,11 +112,23 @@ type ScaffoldConfig struct {
 	OutputPaths map[string]string `yaml:"output_paths"`
 }
 
+type pathOverlay struct {
+	Extends      string           `yaml:"extends"`
+	Repositories RepositoryConfig `yaml:"repositories"`
+}
+
 // Load reads and parses a config file from the given path.
 func Load(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading config file: %w", err)
+	}
+	hasExtends, err := hasTopLevelKey(data, "extends")
+	if err != nil {
+		return nil, fmt.Errorf("parsing config file: %w", err)
+	}
+	if hasExtends {
+		return loadPathOverlay(path, data)
 	}
 
 	var cfg Config
@@ -126,6 +141,82 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+func loadPathOverlay(path string, data []byte) (*Config, error) {
+	var overlay pathOverlay
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	if err := decoder.Decode(&overlay); err != nil {
+		return nil, fmt.Errorf("parsing config overlay: %w", err)
+	}
+	if strings.TrimSpace(overlay.Extends) == "" {
+		return nil, fmt.Errorf("config overlay extends must not be empty")
+	}
+	if overlay.Repositories == (RepositoryConfig{}) {
+		return nil, fmt.Errorf("config overlay must override at least one repository path")
+	}
+
+	basePath := overlay.Extends
+	if !filepath.IsAbs(basePath) {
+		basePath = filepath.Join(filepath.Dir(path), basePath)
+	}
+	basePath, err := filepath.Abs(filepath.Clean(basePath))
+	if err != nil {
+		return nil, fmt.Errorf("resolving base config path: %w", err)
+	}
+	overlayPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, fmt.Errorf("resolving config overlay path: %w", err)
+	}
+	if basePath == overlayPath {
+		return nil, fmt.Errorf("config overlay must not extend itself")
+	}
+	baseData, err := os.ReadFile(basePath)
+	if err != nil {
+		return nil, fmt.Errorf("reading base config %s: %w", basePath, err)
+	}
+	baseExtends, err := hasTopLevelKey(baseData, "extends")
+	if err != nil {
+		return nil, fmt.Errorf("parsing base config %s: %w", basePath, err)
+	}
+	if baseExtends {
+		return nil, fmt.Errorf("base config %s contains extends; nested extends is not supported", basePath)
+	}
+	var cfg Config
+	if err := yaml.Unmarshal(baseData, &cfg); err != nil {
+		return nil, fmt.Errorf("parsing base config %s: %w", basePath, err)
+	}
+	if overlay.Repositories.Saltbox != "" {
+		cfg.Repositories.Saltbox = overlay.Repositories.Saltbox
+	}
+	if overlay.Repositories.Sandbox != "" {
+		cfg.Repositories.Sandbox = overlay.Repositories.Sandbox
+	}
+	if overlay.Repositories.Docs != "" {
+		cfg.Repositories.Docs = overlay.Repositories.Docs
+	}
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("validating config: %w", err)
+	}
+	return &cfg, nil
+}
+
+func hasTopLevelKey(data []byte, key string) (bool, error) {
+	var document yaml.Node
+	if err := yaml.Unmarshal(data, &document); err != nil {
+		return false, err
+	}
+	if len(document.Content) == 0 || document.Content[0].Kind != yaml.MappingNode {
+		return false, nil
+	}
+	mapping := document.Content[0]
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Validate checks the configuration for required fields and consistency.

@@ -183,6 +183,38 @@ func TestDockerEnvsType(t *testing.T) {
 	}
 }
 
+func TestParsedCommentLeadingBlockListType(t *testing.T) {
+	path := writeParserFixture(t, `---
+################################
+# Config
+################################
+
+example_role_config_settings_default:
+  # Settings
+  - { option: "name", value: "example" }
+`)
+	role, err := New("example", "saltbox").ParseFile(path)
+	if err != nil {
+		t.Fatalf("ParseFile() error = %v", err)
+	}
+	if len(role.AllVariables) != 1 {
+		t.Fatalf("ParseFile() variables = %d, want 1", len(role.AllVariables))
+	}
+	variable := role.AllVariables[0]
+	if got := NewTypeInferrer(nil).InferType(variable.Name, variable.RawValue); got != List {
+		t.Fatalf("InferType(%q) = %q, want %q; raw value %q", variable.Name, got, List, variable.RawValue)
+	}
+}
+
+func writeParserFixture(t *testing.T, content string) string {
+	t.Helper()
+	path := t.TempDir() + "/main.yml"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("writing parser fixture: %v", err)
+	}
+	return path
+}
+
 func TestSSODetection(t *testing.T) {
 	// Test SSO enabled detection with bazarr (has traefik_default_sso_middleware)
 	testFile := "/srv/git/saltbox/roles/bazarr/defaults/main.yml"

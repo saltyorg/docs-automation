@@ -253,6 +253,27 @@ section_explainers:
 	}
 }
 
+func TestTypeInferenceParsesFiltersAndSymbols(t *testing.T) {
+	const input = `
+type_inference:
+  filters:
+    traefik_certificate_domains: list
+  symbols:
+    traefik_http: bool
+`
+
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("unmarshalling type inference config: %v", err)
+	}
+	if got := cfg.TypeInference.Filters["traefik_certificate_domains"]; got != "list" {
+		t.Fatalf("filter type = %q, want list", got)
+	}
+	if got := cfg.TypeInference.Symbols["traefik_http"]; got != "bool" {
+		t.Fatalf("symbol type = %q, want bool", got)
+	}
+}
+
 func TestDockerOverridesRemainBackwardCompatible(t *testing.T) {
 	const input = `
 docker_overrides:

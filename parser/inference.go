@@ -76,9 +76,114 @@ func (t *TypeInferrer) InferType(name, value string) string {
 	return t.inferFromNamePattern(name)
 }
 
+// InferRoleTypes infers a role's variables together so expressions can reuse
+// types already proven for same-role variables and declared external suffixes.
+func (t *TypeInferrer) InferRoleTypes(roleName string, variables []Variable, referenceTypes map[string]string) map[string]string {
+	types := make(map[string]string, len(variables))
+	filterTypes := map[string]string(nil)
+	if t.cfg != nil {
+		filterTypes = t.cfg.Filters
+	}
+
+	for _, variable := range variables {
+		analysisValue := stripInlineYAMLComment(variable.RawValue)
+		typ := t.InferType(variable.Name, analysisValue)
+		_, pureJinja := unwrapPureJinjaExpression(analysisValue)
+		if typ != String || !pureJinja || t.hasConfiguredType(variable.Name) {
+			types[variable.Name] = typ
+		}
+	}
+
+	for range len(variables) {
+		progress := false
+		resolver := func(expr string) (string, bool) {
+			expr = strings.TrimSpace(expr)
+			if isJinjaIdentifier(expr) {
+				if typ, ok := types[expr]; ok {
+					return typ, true
+				}
+				typ, ok := referenceTypes[expr]
+				return typ, ok
+			}
+			matches := roleVarLookupRe.FindStringSubmatch(expr)
+			if matches == nil || !strings.HasPrefix(expr, "lookup") {
+				return "", false
+			}
+			suffix := matches[1]
+			for _, candidate := range []string{roleName + "_role" + suffix, roleName + suffix} {
+				if typ, ok := types[candidate]; ok {
+					return typ, true
+				}
+			}
+			typ, ok := referenceTypes[suffix]
+			return typ, ok
+		}
+
+		for _, variable := range variables {
+			if _, exists := types[variable.Name]; exists {
+				continue
+			}
+			typ, ok := inferJinjaExpressionType(stripInlineYAMLComment(variable.RawValue), filterTypes, resolver)
+			if !ok {
+				continue
+			}
+			types[variable.Name] = typ
+			progress = true
+		}
+		if !progress {
+			break
+		}
+	}
+
+	for _, variable := range variables {
+		if _, exists := types[variable.Name]; !exists {
+			types[variable.Name] = t.InferType(variable.Name, variable.RawValue)
+		}
+	}
+	return types
+}
+
+func (t *TypeInferrer) hasConfiguredType(name string) bool {
+	if t.cfg == nil {
+		return false
+	}
+	for suffix := range t.cfg.Exact {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	for suffix := range t.cfg.Overrides {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func isJinjaIdentifier(expr string) bool {
+	if expr == "" || !isJinjaIdentifierStart(expr[0]) {
+		return false
+	}
+	for i := 1; i < len(expr); i++ {
+		if !isJinjaIdentifierPart(expr[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isJinjaIdentifierStart(ch byte) bool {
+	return ch == '_' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z'
+}
+
+func isJinjaIdentifierPart(ch byte) bool {
+	return isJinjaIdentifierStart(ch) || ch >= '0' && ch <= '9'
+}
+
 // inferFromValue attempts to determine type from the raw value.
 // This follows Python's approach: infer primarily from value type, not name patterns.
 func (t *TypeInferrer) inferFromValue(value string) string {
+	value = stripInlineYAMLComment(value)
 	// Check for multiline values first
 	if strings.Contains(value, "\n") {
 		lines := strings.Split(value, "\n")
@@ -86,15 +191,20 @@ func (t *TypeInferrer) inferFromValue(value string) string {
 
 		// Empty first line with indented content = block dict or list
 		if firstLine == "" && len(lines) > 1 {
-			secondLine := lines[1]
-			trimmedSecond := strings.TrimSpace(secondLine)
-			// Block list starts with -
-			if strings.HasPrefix(trimmedSecond, "-") {
-				return List
-			}
-			// Block dict has key: value pairs
-			if strings.Contains(trimmedSecond, ":") && !strings.HasPrefix(trimmedSecond, "#") {
-				return Dict
+			for _, line := range lines[1:] {
+				firstContent := strings.TrimSpace(line)
+				if firstContent == "" || strings.HasPrefix(firstContent, "#") {
+					continue
+				}
+				// Block list starts with -
+				if strings.HasPrefix(firstContent, "-") {
+					return List
+				}
+				// Block dict has key: value pairs
+				if strings.Contains(firstContent, ":") {
+					return Dict
+				}
+				break
 			}
 		}
 
@@ -147,7 +257,11 @@ func (t *TypeInferrer) inferFromValue(value string) string {
 	}
 
 	// Pure Jinja expressions can preserve native collection types in Ansible.
-	if typ, ok := inferJinjaCollectionType(trimmedValue); ok {
+	filterTypes := map[string]string(nil)
+	if t.cfg != nil {
+		filterTypes = t.cfg.Filters
+	}
+	if typ, ok := inferJinjaExpressionType(trimmedValue, filterTypes, nil); ok {
 		return typ
 	}
 
@@ -159,6 +273,36 @@ func (t *TypeInferrer) inferFromValue(value string) string {
 
 	// Default: treat as string (matches Python behavior for unknown types)
 	return String
+}
+
+func stripInlineYAMLComment(value string) string {
+	var quote byte
+	escaped := false
+	for i := 0; i < len(value); i++ {
+		ch := value[i]
+		if quote != 0 {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				continue
+			}
+			if ch == quote {
+				quote = 0
+			}
+			continue
+		}
+		if ch == '\'' || ch == '"' {
+			quote = ch
+			continue
+		}
+		if ch == '#' && (i == 0 || value[i-1] == ' ' || value[i-1] == '\t') && strings.TrimSpace(value[:i]) != "" {
+			return strings.TrimRight(value[:i], " \t\r\n")
+		}
+	}
+	return value
 }
 
 // inferFromNamePattern infers type from variable name patterns.

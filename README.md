@@ -153,11 +153,15 @@ When a role defines the primary variable, the complete group is shown in the rol
 | `exact` | map | no | Suffix-to-type map checked first |
 | `overrides` | map | no | Additional suffix overrides checked after `exact` |
 | `patterns` | list | no | Pattern rules matched by substring |
+| `filters` | map | no | Jinja filter names mapped to their proven return types |
+| `symbols` | map | no | External variable names mapped to declared types for role-level reference inference |
 
 Value inference recognizes native YAML literals and conservative collection evidence in pure Jinja
 expressions. A complete dictionary or list literal is inferred as `dict` or `list`; a Jinja conditional
 is inferred only when both branches prove the same collection type. Expressions that depend on
-variables, lookups, or filters keep the existing string fallback unless an explicit type rule applies.
+variables or unresolved lookups keep the existing string fallback unless an explicit type rule applies.
+Variables within one role are inferred together so direct references and same-role `role_var` collection
+expressions can reuse already-proven types.
 
 Each `patterns` entry includes:
 

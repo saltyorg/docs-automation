@@ -125,6 +125,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document
 	} else {
 		typeInfer = parser.NewTypeInferrer(nil)
 	}
+	roleTypes := typeInfer.InferRoleTypes(role.Name, role.AllVariables, buildReferenceTypes(cfg))
 
 	// Build set of base variables to hide (those with both _default and _custom variants)
 	hideBase := parser.BuildHideBaseSet(role.AllVariables)
@@ -155,7 +156,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document
 				if hideBase[v.Name] {
 					continue
 				}
-				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, cfg, fmConfig)
+				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, roleTypes, cfg, fmConfig)
 				sectionData.Variables = append(sectionData.Variables, varData)
 			}
 
@@ -190,7 +191,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document
 				if hideBase[v.Name] {
 					continue
 				}
-				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, cfg, fmConfig)
+				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, roleTypes, cfg, fmConfig)
 				sectionData.Variables = append(sectionData.Variables, varData)
 			}
 
@@ -202,7 +203,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document
 					if hideBase[v.Name] {
 						continue
 					}
-					varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, cfg, fmConfig)
+					varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, roleTypes, cfg, fmConfig)
 					sectionData.Subsections[subName] = append(sectionData.Subsections[subName], varData)
 				}
 			}
@@ -538,7 +539,7 @@ func buildDockerOverrideVariableData(roleName, instanceName, variablePrefix, suf
 		RawValue: rawValue,
 		Section:  "Docker",
 	}
-	return buildVariableData(&variable, roleName, instanceName, typeInfer, cfg, fmConfig)
+	return buildVariableData(&variable, roleName, instanceName, typeInfer, nil, cfg, fmConfig)
 }
 
 func dockerOverrideGroupMembers(group config.DockerOverrideGroup) []string {
@@ -579,18 +580,56 @@ func sectionExplainer(cfg *config.Config, sectionName string) string {
 	return strings.TrimSpace(cfg.SectionExplainers[sectionName])
 }
 
+func buildReferenceTypes(cfg *config.Config) map[string]string {
+	if cfg == nil {
+		return nil
+	}
+	types := make(map[string]string)
+	for suffix, definition := range cfg.GlobalOverrides.Variables {
+		if definition.Type != "" {
+			types[suffix] = definition.Type
+		}
+	}
+	for symbol, typ := range cfg.TypeInference.Symbols {
+		if typ != "" {
+			types[symbol] = typ
+		}
+	}
+	for typ, suffixes := range map[string][]string{
+		parser.Bool: cfg.DockerVariables.Bool,
+		parser.Int:  cfg.DockerVariables.Int,
+		parser.List: cfg.DockerVariables.List,
+		parser.Dict: cfg.DockerVariables.Dict,
+	} {
+		for _, suffix := range suffixes {
+			types["_docker_"+config.NormalizeDockerSuffix(suffix)] = typ
+		}
+	}
+	for suffix, definition := range cfg.DockerOverrides.Variables {
+		if definition.Type != "" {
+			types["_docker_"+config.NormalizeDockerSuffix(suffix)] = definition.Type
+		}
+	}
+	return types
+}
+
 // buildVariableData creates VariableData from a parsed Variable.
-func buildVariableData(v *parser.Variable, roleName, instanceName string, typeInfer *parser.TypeInferrer, cfg *config.Config, fmConfig *document.SaltboxAutomationConfig) *VariableData {
+func buildVariableData(v *parser.Variable, roleName, instanceName string, typeInfer *parser.TypeInferrer, roleTypes map[string]string, cfg *config.Config, fmConfig *document.SaltboxAutomationConfig) *VariableData {
 	// Check for example override
 	rawValue := v.RawValue
+	hasExampleOverride := false
 	if fmConfig != nil {
 		if override, ok := fmConfig.GetExampleOverride(v.Name); ok {
 			rawValue = override
+			hasExampleOverride = true
 		}
 	}
 
 	// Infer type
-	typ := typeInfer.InferType(v.Name, rawValue)
+	typ, resolved := roleTypes[v.Name]
+	if !resolved || hasExampleOverride {
+		typ = typeInfer.InferType(v.Name, rawValue)
+	}
 	description := ""
 	if cfg != nil {
 		if suffix, ok := dockerVariableSuffix(v.Name, roleName); ok {

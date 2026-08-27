@@ -18,6 +18,15 @@ func TestTypeInferrerInfersDDNSConditionalDictionary(t *testing.T) {
 	}
 }
 
+func TestTypeInferrerInfersCommentLeadingBlockList(t *testing.T) {
+	value := "\n  # Authentication\n  - { option: \"username\", value: \"user\" }\n  # Paths\n  - { option: \"path\", value: \"/data\" }"
+
+	got := NewTypeInferrer(nil).InferType("example_role_config_settings_default", value)
+	if got != List {
+		t.Fatalf("InferType() = %q, want %q", got, List)
+	}
+}
+
 func TestTypeInferrerInfersConditionalList(t *testing.T) {
 	value := `"{{ ['one', {'nested': true}]
                    if feature_enabled
@@ -26,6 +35,118 @@ func TestTypeInferrerInfersConditionalList(t *testing.T) {
 	got := NewTypeInferrer(nil).InferType("example_role_docker_ports", value)
 	if got != List {
 		t.Fatalf("InferType() = %q, want %q", got, List)
+	}
+}
+
+func TestTypeInferrerInfersExplicitBooleanFilter(t *testing.T) {
+	value := `"{{ lookup('role_var', '_privileged', role='example') | bool }}"`
+
+	got := NewTypeInferrer(nil).InferType("example_role_docker_privileged", value)
+	if got != Bool {
+		t.Fatalf("InferType() = %q, want %q", got, Bool)
+	}
+}
+
+func TestTypeInferrerInfersSameTypeAddition(t *testing.T) {
+	value := `"{{ (['one'] | list) + ([] | list) }}"`
+
+	got := NewTypeInferrer(nil).InferType("example_role_paths", value)
+	if got != List {
+		t.Fatalf("InferType() = %q, want %q", got, List)
+	}
+}
+
+func TestTypeInferrerUsesConfiguredJinjaFilterType(t *testing.T) {
+	cfg := config.TypeInferenceConfig{
+		Filters: map[string]string{"traefik_certificate_domains": List},
+	}
+	value := `"{{ domain | traefik_certificate_domains([], [], true, []) }}"`
+
+	got := NewTypeInferrer(&cfg).InferType("example_role_certificate_domains", value)
+	if got != List {
+		t.Fatalf("InferType() = %q, want %q", got, List)
+	}
+}
+
+func TestTypeInferrerInfersRoleVariableGraph(t *testing.T) {
+	variables := []Variable{
+		{
+			Name:     "example_role_config_settings_default",
+			RawValue: "\n  # Settings\n  - { option: \"name\", value: \"example\" }",
+		},
+		{Name: "example_role_config_settings_custom", RawValue: "[]"},
+		{
+			Name: "example_role_config_settings_list",
+			RawValue: `"{{ lookup('role_var', '_config_settings_default', role='example')
+                             + lookup('role_var', '_config_settings_custom', role='example') }}"`,
+		},
+	}
+
+	got := NewTypeInferrer(nil).InferRoleTypes("example", variables, nil)
+	if got["example_role_config_settings_list"] != List {
+		t.Fatalf("InferRoleTypes() = %q, want %q", got["example_role_config_settings_list"], List)
+	}
+}
+
+func TestTypeInferrerRejectsMixedRoleVariableAddition(t *testing.T) {
+	variables := []Variable{
+		{Name: "example_role_items_default", RawValue: "[]"},
+		{Name: "example_role_items_custom", RawValue: "{}"},
+		{
+			Name: "example_role_items",
+			RawValue: `"{{ lookup('role_var', '_items_default', role='example')
+                      + lookup('role_var', '_items_custom', role='example') }}"`,
+		},
+	}
+
+	got := NewTypeInferrer(nil).InferRoleTypes("example", variables, nil)
+	if got["example_role_items"] != String {
+		t.Fatalf("InferRoleTypes() = %q, want %q", got["example_role_items"], String)
+	}
+}
+
+func TestTypeInferrerUsesDeclaredExternalSymbol(t *testing.T) {
+	variables := []Variable{
+		{Name: "example_role_cleanup_enabled", RawValue: `"{{ shared_cleanup_enabled }}"`},
+	}
+
+	got := NewTypeInferrer(nil).InferRoleTypes(
+		"example",
+		variables,
+		map[string]string{"shared_cleanup_enabled": Bool},
+	)
+	if got["example_role_cleanup_enabled"] != Bool {
+		t.Fatalf("InferRoleTypes() = %q, want %q", got["example_role_cleanup_enabled"], Bool)
+	}
+}
+
+func TestTypeInferrerUsesDeclaredSymbolBeforeInlineComment(t *testing.T) {
+	variables := []Variable{
+		{Name: "example_role_cleanup_number", RawValue: `"{{ shared_cleanup_number }}" # Int`},
+	}
+
+	got := NewTypeInferrer(nil).InferRoleTypes(
+		"example",
+		variables,
+		map[string]string{"shared_cleanup_number": Int},
+	)
+	if got["example_role_cleanup_number"] != Int {
+		t.Fatalf("InferRoleTypes() = %q, want %q", got["example_role_cleanup_number"], Int)
+	}
+}
+
+func TestTypeInferrerInfersSameTypeLogicalOperation(t *testing.T) {
+	variables := []Variable{
+		{Name: "example_role_http_validation", RawValue: `"{{ shared_http or (settings.http | bool) }}"`},
+	}
+
+	got := NewTypeInferrer(nil).InferRoleTypes(
+		"example",
+		variables,
+		map[string]string{"shared_http": Bool},
+	)
+	if got["example_role_http_validation"] != Bool {
+		t.Fatalf("InferRoleTypes() = %q, want %q", got["example_role_http_validation"], Bool)
 	}
 }
 
@@ -82,6 +203,16 @@ func TestTypeInferrerInfersPureJinjaCollections(t *testing.T) {
 			value: `"{{ {'text': 'if this else that'} if enabled else {'else': 'if'} }}"`,
 			want:  Dict,
 		},
+		{
+			name:  "terminal combine filter",
+			value: `"{{ defaults | combine(overrides) }}"`,
+			want:  Dict,
+		},
+		{
+			name:  "terminal list filter",
+			value: `"{{ values | list }}"`,
+			want:  List,
+		},
 	}
 
 	inferrer := NewTypeInferrer(nil)
@@ -105,8 +236,6 @@ func TestTypeInferrerPreservesStringFallbackForUnprovenJinja(t *testing.T) {
 		{name: "embedded interpolation", value: `"prefix-{{ {} }}"`},
 		{name: "collection text in string", value: `"{{ '{not a dictionary}' }}"`},
 		{name: "unbalanced dictionary", value: `"{{ {'key': ['value'} }}"`},
-		{name: "combine filter", value: `"{{ defaults | combine(overrides) }}"`},
-		{name: "list filter", value: `"{{ values | list }}"`},
 	}
 
 	inferrer := NewTypeInferrer(nil)

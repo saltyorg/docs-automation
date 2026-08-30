@@ -14,8 +14,8 @@ func newGenerateCommand(rootOpts *rootOptions, deps dependencies) *cobra.Command
 		Short: "Generate documentation content to stdout",
 		Long: `Generate documentation content to stdout.
 
-Without a role argument, generates all roles + CLI help.
-With a role argument, generates only that role (no CLI by default).`,
+Without a role argument, generates all roles. Use --cli to include CLI help.
+With a role argument, generates only that role and does not include CLI help.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg, err := deps.loadConfig(rootOpts.configPath)

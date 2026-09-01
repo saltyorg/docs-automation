@@ -44,7 +44,7 @@ sb-docs generate sonarr
 # Update one role's existing managed sections.
 sb-docs update sonarr
 
-# Update every non-blacklisted role, refresh CLI help, and report coverage.
+# Update every non-blacklisted role, refresh CLI help, and run configured documentation-health checks.
 sb-docs update --check
 ```
 
@@ -84,11 +84,11 @@ run. A role that exists in both repositories resolves to Saltbox first.
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--no-cli` | `false` | Skip CLI help during an all-role update |
-| `--check` | `false` | Report missing docs, missing managed sections, and orphaned docs after an all-role update |
+| `--check` | `false` | Build and report the configured documentation-health checks after an all-role update |
 | `--manage-issue` | `false` | Create, update, or close the managed GitHub issue; effective only with `--check` |
-| `--issue-label <label>` | `docs-automation` | Label used to find and manage the coverage issue |
+| `--issue-label <label>` | `docs-automation` | Label used to find and manage the Docs-health issue |
 
-`--manage-issue` requires an installed and authenticated `gh` CLI. Coverage
+`--manage-issue` requires an installed and authenticated `gh` CLI. Health
 findings are reported; they are not converted into a nonzero exit status.
 All-role processing also reports individual role and integration failures as
 warnings so the final summary remains available.
@@ -148,8 +148,10 @@ paths and cross-field constraints.
 `validate frontmatter` recursively checks Markdown below `docs/apps` and
 `docs/sandbox/apps`, excluding `index.md`. It validates YAML parsing,
 non-empty `app_links[].name`, non-empty `app_links[].url`, and the documented
-project-name dependency. Documentation reached only through a path override,
-such as `docs/reference/modules`, is not part of this frontmatter scan.
+`project_description` name and summary requirements when enabled. It honors
+frontmatter path and page opt-outs. Documentation reached only through a path
+override, such as `docs/reference/modules`, is not part of this frontmatter
+scan.
 
 #### `sb-docs index`
 
@@ -200,6 +202,8 @@ directory semantics of a full config.
 | `cli_help` | object | command-specific | CLI binary and destination file |
 | `markers` | object | `variables` required | Managed-section names |
 | `scaffold` | object | command-specific | Repo-specific output path patterns |
+| `checks` | object | coverage enabled; other categories disabled | Documentation-health policy |
+| `issue` | object | empty source metadata | Source-link metadata for documentation-health issues |
 
 ### `repositories`
 
@@ -223,6 +227,147 @@ must each contain a `roles` directory.
 
 An explicit single-role `generate`, `update`, or `scaffold` is not blocked by
 the blacklist.
+
+### Documentation Health
+
+`update --check` builds one structured documentation-health report after an
+all-role update. It includes role and CLI automation failures when those steps
+were requested, plus the enabled policy categories below. The canonical config
+is the authority for the current blacklist, path exceptions, editorial
+statuses, and source repositories; this reference deliberately documents the
+schema rather than repeating those evolving values.
+
+#### `checks`
+
+Each category accepts this shape:
+
+```yaml
+checks:
+  coverage:
+    enabled: true
+    exclude_paths: []
+  frontmatter:
+    enabled: false
+    exclude_paths: []
+  editorial:
+    enabled: false
+    exclude_paths: []
+    statuses: []
+```
+
+| Category | Default when omitted | Findings when enabled |
+|----------|----------------------|-----------------------|
+| `coverage` | `true` | Missing role pages, missing variables or overview marker pairs, and orphaned app pages |
+| `frontmatter` | `false` | Unparseable frontmatter and invalid enabled overview metadata |
+| `editorial` | `false` | Pages whose top-level `status` exactly matches a configured editorial status |
+
+`enabled` is optional in every category. `exclude_paths` is an optional list
+of non-empty, docs-root-relative paths; each entry is normalized and then
+matched as one exact path, not as a prefix or glob. Absolute paths, paths that
+escape the Docs root, and duplicate normalized paths are rejected. An empty
+list means there are no config-level exceptions for that category.
+
+Only `editorial` accepts `statuses`. When editorial checking is enabled, its
+status list is required and every value must be non-empty. A page's ordinary
+top-level `status` is preserved for the Docs site and is consulted only by the
+editorial category; it is not a `saltbox_automation` field.
+
+Coverage first checks source roles against `blacklist.docs_coverage`; a
+blacklisted role is exempt from missing-page detection and its corresponding
+page is exempt from coverage page checks. Use this only for a role that has no
+standalone page. If a helper is documented under its parent, retain an
+owner-commented blacklist entry for the helper instead of broadly excluding
+its parent or its documentation path.
+
+#### Page-level controls and precedence
+
+The optional page controls live in `saltbox_automation`:
+
+```yaml
+saltbox_automation:
+  disabled: false
+  checks:
+    coverage: true
+    frontmatter: true
+    editorial: true
+```
+
+An omitted page check inherits enabled behavior for that page. For an existing
+page, the effective precedence is: a disabled global category produces no
+findings; an exact category `exclude_paths` entry exempts that category;
+coverage then applies its role blacklist; `disabled: true` exempts all
+page-level checks and in-place automation; and `checks.<category>: false`
+exempts only that category. The specific section toggles are applied last:
+`sections.inventory: false` exempts only the variables-marker coverage check,
+while `sections.overview: false` exempts the overview-marker coverage check
+and overview metadata validation. Neither section setting exempts editorial
+attention. Missing source-role pages have no page frontmatter, so they require
+a coverage blacklist rather than a page-level opt-out.
+
+Frontmatter syntax and frontmatter semantics are distinct. Invalid YAML or an
+unclosed frontmatter block is a syntax finding. For an enabled overview,
+semantic validation requires `project_description.name` and
+`project_description.summary`, and each configured `app_links` entry requires
+both `name` and `url`. A syntactically valid page without
+`saltbox_automation` has no automation metadata to validate.
+
+`sb-docs validate frontmatter` is an explicit corpus validator, not a
+docs-health report switch: it runs even when `checks.frontmatter.enabled` is
+false. It honors frontmatter path exclusions and the page opt-outs above,
+prints valid, invalid, no-frontmatter, and excluded totals, and exits nonzero
+when any non-excluded file is syntactically or semantically invalid. In
+contrast, `sb-docs validate config` loads the selected full config or
+path-only overlay, validates its schema and required repository directories,
+and prints `✅ Config is valid` on success.
+
+#### `issue`
+
+`issue.source_repositories` supplies provenance and source-link metadata for
+health findings:
+
+```yaml
+issue:
+  source_repositories:
+    saltbox:
+      slug: owner/repository
+      ref: branch-or-tag
+```
+
+Each configured source has a GitHub `owner/repository` `slug` and a non-empty
+`ref`. The report uses the checked-out revision when it can resolve one and
+falls back to `ref`; Docs links use the GitHub workflow repository and branch.
+
+#### Health issue, summaries, and exits
+
+`--manage-issue` is effective only with all-role `update --check` and requires
+an authenticated `gh` CLI. The managed issue body is regenerated, beginning
+with an alert that manual task state is not retained. It contains a per-check
+status/findings/exemptions table, remediation and finding tables for each
+actionable category, run context, and an opaque versioned state marker.
+
+The manager creates and pins an issue when findings exist, updates and reopens
+the labelled issue as needed, and unpins, comments, then closes it when every
+enabled category is healthy. For an existing issue with a valid prior state,
+it adds at most one bounded comment per new semantic state: the comment has
+before/after/delta counts plus added and resolved finding identities. It does
+not create a comment merely because rendering or run provenance changed, and
+an absent or malformed legacy state is migrated by regenerating the body
+without a transition comment.
+
+In GitHub Actions, the update summary is appended to `GITHUB_STEP_SUMMARY`.
+The GitHub Actions issue-output adapter writes the following names to
+`GITHUB_OUTPUT` when it is invoked in a GitHub Actions run: `has_issues`,
+`total_issues`, `missing_docs`, `missing_sections`,
+`missing_overview_sections`, `orphaned_docs`, `invalid_frontmatter`,
+`editorial_attention`, `role_automation_errors`, `cli_automation_errors`,
+`error_findings`, `notice_findings`, `total_findings`, and, when findings
+exist, `issue_title` and multiline `issue_body`.
+
+Health findings remain reports, not a new exit-status gate. As before,
+per-role automation failures, CLI-help failures, health-report construction,
+managed-issue failures, and GitHub-summary write failures are emitted as
+warnings so the final summary remains available. Configuration and explicit
+validator failures still return errors.
 
 ### `path_overrides`
 
@@ -421,6 +566,10 @@ does not configure this tool.
 ---
 saltbox_automation:
   disabled: false
+  checks:
+    coverage: true
+    frontmatter: true
+    editorial: true
   sections:
     inventory: true
     overview: true
@@ -445,6 +594,7 @@ saltbox_automation:
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `disabled` | bool | `false` | Skip in-place updates and managed-section coverage checks for the page |
+| `checks` | object | enabled defaults | Per-page docs-health category opt-outs |
 | `sections` | object | enabled defaults | Enable inventory and overview updates independently |
 | `inventory` | object | empty filters | Filter rendered sections and override examples |
 | `app_links` | list | `[]` | Buttons rendered in the managed overview |
@@ -459,6 +609,18 @@ saltbox_automation:
 
 `disabled: true` takes precedence over both. A section is updated only when it
 is enabled and the corresponding marker pair exists.
+
+### `checks`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `coverage` | bool | `true` | Include the page in coverage checks |
+| `frontmatter` | bool | `true` | Include the page in frontmatter validation |
+| `editorial` | bool | `true` | Include the page in editorial-status checking |
+
+`disabled: true` wins over every page check. See [Documentation Health](#documentation-health)
+for category-specific path exclusions, section-level effects, and the full
+precedence order.
 
 ### `inventory`
 

@@ -2,14 +2,15 @@ package automation
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/saltyorg/docs-automation/config"
 	"github.com/saltyorg/docs-automation/document"
 	"github.com/saltyorg/docs-automation/github"
+	"github.com/saltyorg/docs-automation/health"
 	"github.com/saltyorg/docs-automation/parser"
 	"github.com/saltyorg/docs-automation/render"
 )
@@ -32,18 +33,23 @@ func (e *skipError) Error() string {
 }
 
 // Update updates one role or all configured roles in place.
-func (r *Runner) Update(ctx context.Context, cfg *config.Config, role string, opts UpdateOptions) error {
+func (r *Runner) Update(ctx context.Context, cfg *config.Config, role string, opts UpdateOptions) (err error) {
+	defer func() { err = r.result(err) }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if role != "" {
-		return r.updateRole(ctx, cfg, role)
+	sources, err := loadSourceCatalog(cfg)
+	if err != nil {
+		return err
 	}
-	return r.updateAllRoles(ctx, cfg, opts)
+	if role != "" {
+		return r.updateRole(ctx, cfg, sources, role)
+	}
+	return r.updateAllRoles(ctx, cfg, sources, opts)
 }
 
 // updateRole updates documentation for a single role.
-func (r *Runner) updateRole(ctx context.Context, cfg *config.Config, roleName string) error {
+func (r *Runner) updateRole(ctx context.Context, cfg *config.Config, sources render.SourceCatalog, roleName string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -61,11 +67,11 @@ func (r *Runner) updateRole(ctx context.Context, cfg *config.Config, roleName st
 		}
 	}
 
-	return r.updateRoleWithType(ctx, cfg, roleName, repoType)
+	return r.updateRoleWithType(ctx, cfg, sources, roleName, repoType)
 }
 
 // updateAllRoles updates documentation for all roles.
-func (r *Runner) updateAllRoles(ctx context.Context, cfg *config.Config, opts UpdateOptions) error {
+func (r *Runner) updateAllRoles(ctx context.Context, cfg *config.Config, sources render.SourceCatalog, opts UpdateOptions) error {
 	// Get all saltbox roles
 	saltboxRoles, err := listRoles(cfg.SaltboxRolesPath())
 	if err != nil {
@@ -92,7 +98,7 @@ func (r *Runner) updateAllRoles(ctx context.Context, cfg *config.Config, opts Up
 			return err
 		}
 		r.verbosef("Updating: %s (saltbox)\n", role)
-		result := r.updateRoleWithResult(ctx, cfg, role, "saltbox")
+		result := r.updateRoleWithResult(ctx, cfg, sources, role, "saltbox")
 		summary.AddRole(result)
 
 		switch result.Status {
@@ -108,7 +114,7 @@ func (r *Runner) updateAllRoles(ctx context.Context, cfg *config.Config, opts Up
 			return err
 		}
 		r.verbosef("Updating: %s (sandbox)\n", role)
-		result := r.updateRoleWithResult(ctx, cfg, role, "sandbox")
+		result := r.updateRoleWithResult(ctx, cfg, sources, role, "sandbox")
 		summary.AddRole(result)
 
 		switch result.Status {
@@ -121,34 +127,35 @@ func (r *Runner) updateAllRoles(ctx context.Context, cfg *config.Config, opts Up
 
 	r.printf("Updated %d roles, %d unchanged, %d skipped, %d errors\n", summary.Updated, summary.Unchanged, summary.Skipped, summary.Errors)
 
-	// Update CLI help unless --no-cli was specified
+	// Update CLI help unless --no-cli was specified.
+	var cliErr error
 	if !opts.NoCLI {
-		changed, err := r.UpdateCLIHelp(ctx, cfg, "")
-		if err != nil {
-			r.errorf("Warning: failed to update CLI help: %v\n", err)
+		changed, updateErr := r.UpdateCLIHelp(ctx, cfg, "")
+		if updateErr != nil {
+			cliErr = updateErr
+			r.errorf("Warning: failed to update CLI help: %v\n", updateErr)
 		} else if changed {
 			summary.CLIUpdated = true
 		}
 	}
 
-	// Run coverage checks if requested
+	// Build the canonical health report if requested.
 	if opts.RunCheck {
-		checkResult, err := r.runCoverageChecks(ctx, cfg)
+		report, err := r.buildHealthReport(ctx, cfg, summary, !opts.NoCLI, cliErr)
 		if err != nil {
-			r.errorf("Warning: failed to run coverage checks: %v\n", err)
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				return err
+			}
+			r.errorf("Warning: failed to build documentation health report: %v\n", err)
 		} else {
-			summary.SetCheckResult(checkResult)
+			summary.SetHealthReport(&report)
+			r.printHealthReport(report)
 
-			// Print check results
-			r.printCoverageCheckResults(checkResult)
-
-			// Manage GitHub issue if requested
 			if opts.ManageIssue {
 				repo := github.GetRepository()
-				workflowURL := github.GetWorkflowURL()
-				issueManager := github.NewIssueManager(repo, workflowURL)
+				issueManager := github.NewIssueManager(repo, r.out, r.errOut)
 
-				if err := issueManager.ManageIssue(checkResult, opts.IssueLabel); err != nil {
+				if err := issueManager.ManageIssue(ctx, report, opts.IssueLabel); err != nil {
 					r.errorf("Warning: failed to manage GitHub issue: %v\n", err)
 				}
 			}
@@ -164,8 +171,8 @@ func (r *Runner) updateAllRoles(ctx context.Context, cfg *config.Config, opts Up
 }
 
 // updateRoleWithType updates documentation for a role with known repo type.
-func (r *Runner) updateRoleWithType(ctx context.Context, cfg *config.Config, roleName, repoType string) error {
-	result := r.updateRoleWithResult(ctx, cfg, roleName, repoType)
+func (r *Runner) updateRoleWithType(ctx context.Context, cfg *config.Config, sources render.SourceCatalog, roleName, repoType string) error {
+	result := r.updateRoleWithResult(ctx, cfg, sources, roleName, repoType)
 	if result.Status == github.StatusError {
 		return fmt.Errorf("%s", result.Error)
 	}
@@ -176,7 +183,7 @@ func (r *Runner) updateRoleWithType(ctx context.Context, cfg *config.Config, rol
 }
 
 // updateRoleWithResult updates documentation for a role and returns a detailed result.
-func (r *Runner) updateRoleWithResult(ctx context.Context, cfg *config.Config, roleName, repoType string) github.RoleResult {
+func (r *Runner) updateRoleWithResult(ctx context.Context, cfg *config.Config, sources render.SourceCatalog, roleName, repoType string) github.RoleResult {
 	result := github.RoleResult{
 		Name:     roleName,
 		RepoType: repoType,
@@ -266,7 +273,7 @@ func (r *Runner) updateRoleWithResult(ctx context.Context, cfg *config.Config, r
 				inventorySkipReason = "no documentable variables"
 			} else {
 				// Build template data
-				data := render.BuildRoleData(roleInfo, cfg, fmConfig)
+				data := render.BuildRoleData(roleInfo, cfg, fmConfig, sources)
 
 				// Create template engine and render
 				engine := render.New()
@@ -347,228 +354,49 @@ func (r *Runner) updateRoleWithResult(ctx context.Context, cfg *config.Config, r
 	return result
 }
 
-// runCoverageChecks performs coverage checks and returns the results.
-func (r *Runner) runCoverageChecks(ctx context.Context, cfg *config.Config) (*github.CheckResult, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	result := &github.CheckResult{}
-
-	// Create blacklist sets for quick lookup
-	saltboxBlacklist := make(map[string]bool)
-	for _, r := range cfg.Blacklist.DocsCoverage.Saltbox {
-		saltboxBlacklist[r] = true
-	}
-	sandboxBlacklist := make(map[string]bool)
-	for _, r := range cfg.Blacklist.DocsCoverage.Sandbox {
-		sandboxBlacklist[r] = true
-	}
-
-	// Get all roles
-	saltboxRoles, err := listRoles(cfg.SaltboxRolesPath())
-	if err != nil {
-		return nil, fmt.Errorf("listing saltbox roles: %w", err)
-	}
-
-	sandboxRoles, err := listRoles(cfg.SandboxRolesPath())
-	if err != nil {
-		return nil, fmt.Errorf("listing sandbox roles: %w", err)
-	}
-
-	// Filter blacklisted roles
-	saltboxRoles = filterBlacklist(saltboxRoles, cfg.Blacklist.DocsCoverage.Saltbox)
-	sandboxRoles = filterBlacklist(sandboxRoles, cfg.Blacklist.DocsCoverage.Sandbox)
-
-	// Get all documentation files
-	saltboxDocs, err := document.ListDocFiles(cfg.SaltboxDocsPath())
-	if err != nil {
-		return nil, fmt.Errorf("listing saltbox docs: %w", err)
-	}
-
-	sandboxDocs, err := document.ListDocFiles(cfg.SandboxDocsPath())
-	if err != nil {
-		return nil, fmt.Errorf("listing sandbox docs: %w", err)
-	}
-
-	// Create maps for quick lookup
-	saltboxDocMap := make(map[string]string)
-	for _, path := range saltboxDocs {
-		name := document.ExtractRoleName(path)
-		saltboxDocMap[name] = path
-	}
-
-	sandboxDocMap := make(map[string]string)
-	for _, path := range sandboxDocs {
-		name := document.ExtractRoleName(path)
-		sandboxDocMap[name] = path
-	}
-
-	saltboxRoleSet := make(map[string]bool)
-	for _, role := range saltboxRoles {
-		saltboxRoleSet[role] = true
-	}
-
-	sandboxRoleSet := make(map[string]bool)
-	for _, role := range sandboxRoles {
-		sandboxRoleSet[role] = true
-	}
-
-	// Check for missing documentation
-	for _, role := range saltboxRoles {
-		if !roleHasDocCheck(cfg, role, "saltbox", saltboxDocMap) {
-			result.MissingDocs = append(result.MissingDocs, role)
-		}
-	}
-
-	for _, role := range sandboxRoles {
-		if !roleHasDocCheck(cfg, role, "sandbox", sandboxDocMap) {
-			result.MissingDocs = append(result.MissingDocs, "sandbox/"+role)
-		}
-	}
-
-	// Build set of doc names that are targets of path overrides
-	overrideTargets := make(map[string]bool)
-	for _, repoOverrides := range cfg.PathOverrides {
-		for _, overridePath := range repoOverrides {
-			fullPath := filepath.Join(cfg.Repositories.Docs, overridePath)
-			if _, err := os.Stat(fullPath); err == nil {
-				baseName := strings.TrimSuffix(filepath.Base(overridePath), ".md")
-				overrideTargets[baseName] = true
-			}
-		}
-	}
-
-	// Check for orphaned documentation
-	for name := range saltboxDocMap {
-		if saltboxBlacklist[name] || overrideTargets[name] {
+// printHealthReport prints compact nonzero health finding counts.
+func (r *Runner) printHealthReport(report health.Report) {
+	report = report.Canonical()
+	r.printf("\n## Documentation Health\n\n")
+	for _, result := range report.Results {
+		if !result.Enabled || len(result.Findings) == 0 {
 			continue
 		}
-		if !saltboxRoleSet[name] {
-			result.OrphanedDocs = append(result.OrphanedDocs, name)
-		}
-	}
-
-	for name := range sandboxDocMap {
-		if sandboxBlacklist[name] || overrideTargets[name] {
+		if result.Kind.Severity() == health.Notice {
+			r.printf("Notice: %s: %d\n", healthResultLabel(result.Kind), len(result.Findings))
 			continue
 		}
-		if !sandboxRoleSet[name] {
-			result.OrphanedDocs = append(result.OrphanedDocs, "sandbox/"+name)
-		}
+		r.printf("Error: %s: %d\n", healthResultLabel(result.Kind), len(result.Findings))
 	}
 
-	// Check for missing managed sections
-	manager := document.NewManager(document.MarkerConfig{
-		Variables: cfg.Markers.Variables,
-		CLI:       cfg.Markers.CLI,
-		Overview:  cfg.Markers.Overview,
-	})
-	checkedDocs := make(map[string]bool)
-
-	// Check saltbox docs
-	for _, docPath := range saltboxDocs {
-		checkedDocs[docPath] = true
-		roleName := document.ExtractRoleName(docPath)
-		if saltboxBlacklist[roleName] {
-			continue
-		}
-		defaultsPath := filepath.Join(cfg.SaltboxRolesPath(), roleName, "defaults", "main.yml")
-		hasDefaults := true
-		if _, err := os.Stat(defaultsPath); err != nil {
-			if !os.IsNotExist(err) {
-				r.errorf("Warning: failed to stat %s: %v\n", defaultsPath, err)
-			}
-			hasDefaults = false
-		}
-		r.checkDocManagedSections(manager, docPath, cfg.Repositories.Docs, result, hasDefaults)
-	}
-
-	// Check sandbox docs
-	for _, docPath := range sandboxDocs {
-		checkedDocs[docPath] = true
-		roleName := document.ExtractRoleName(docPath)
-		if sandboxBlacklist[roleName] {
-			continue
-		}
-		defaultsPath := filepath.Join(cfg.SandboxRolesPath(), roleName, "defaults", "main.yml")
-		hasDefaults := true
-		if _, err := os.Stat(defaultsPath); err != nil {
-			if !os.IsNotExist(err) {
-				r.errorf("Warning: failed to stat %s: %v\n", defaultsPath, err)
-			}
-			hasDefaults = false
-		}
-		r.checkDocManagedSections(manager, docPath, cfg.Repositories.Docs, result, hasDefaults)
-	}
-
-	return result, nil
-}
-
-// roleHasDocCheck checks if a role has documentation.
-func roleHasDocCheck(cfg *config.Config, roleName, repoType string, docMap map[string]string) bool {
-	if repoOverrides, ok := cfg.PathOverrides[repoType]; ok {
-		if override, ok := repoOverrides[roleName]; ok {
-			docPath := filepath.Join(cfg.Repositories.Docs, override)
-			_, err := os.Stat(docPath)
-			return err == nil
-		}
-	}
-	_, exists := docMap[roleName]
-	return exists
-}
-
-// checkDocManagedSections checks if a doc has the managed sections.
-func (r *Runner) checkDocManagedSections(manager *document.Manager, docPath, docsRoot string, result *github.CheckResult, hasDefaults bool) {
-	doc, err := manager.LoadDocument(docPath)
-	if err != nil {
-		r.errorf("Warning: failed to load %s: %v\n", docPath, err)
+	errors := report.TotalSeverity(health.Error)
+	notices := report.TotalSeverity(health.Notice)
+	if errors == 0 && notices == 0 {
+		r.printf("✅ All enabled documentation health checks passed!\n")
 		return
 	}
-
-	if manager.IsAutomationDisabled(doc) {
-		return
-	}
-
-	var fmConfig *document.SaltboxAutomationConfig
-	if doc.Frontmatter != nil {
-		fmConfig = doc.Frontmatter.SaltboxAutomation
-	}
-
-	relPath, _ := filepath.Rel(docsRoot, docPath)
-
-	if hasDefaults && fmConfig.IsInventorySectionEnabled() && !manager.HasVariablesSection(doc) {
-		result.MissingSections = append(result.MissingSections, relPath)
-	}
-
-	if fmConfig.IsOverviewSectionEnabled() && !manager.HasOverviewSection(doc) {
-		result.MissingOverviewSections = append(result.MissingOverviewSections, relPath)
-	}
+	r.printf("Found %d error(s), %d notice(s)\n", errors, notices)
 }
 
-// printCoverageCheckResults prints the coverage check results.
-func (r *Runner) printCoverageCheckResults(result *github.CheckResult) {
-	r.printf("\n## Coverage Check Results\n\n")
-
-	if len(result.MissingDocs) > 0 {
-		r.printf("Missing Documentation: %d roles\n", len(result.MissingDocs))
-	}
-
-	if len(result.MissingSections) > 0 {
-		r.printf("Missing Variables Sections: %d docs\n", len(result.MissingSections))
-	}
-
-	if len(result.MissingOverviewSections) > 0 {
-		r.printf("Missing Overview Sections: %d docs\n", len(result.MissingOverviewSections))
-	}
-
-	if len(result.OrphanedDocs) > 0 {
-		r.printf("Orphaned Documentation: %d docs\n", len(result.OrphanedDocs))
-	}
-
-	total := result.TotalIssues()
-	if total == 0 {
-		r.printf("✅ All coverage checks passed!\n")
-	} else {
-		r.printf("❌ Found %d issue(s)\n", total)
+func healthResultLabel(kind health.Kind) string {
+	switch kind {
+	case health.RoleAutomationError:
+		return "Role Automation Errors"
+	case health.CLIHelpAutomationError:
+		return "CLI Help Automation Errors"
+	case health.MissingDocumentation:
+		return "Missing Documentation"
+	case health.InvalidFrontmatter:
+		return "Invalid Frontmatter"
+	case health.MissingVariablesSection:
+		return "Missing Variables Sections"
+	case health.MissingOverviewSection:
+		return "Missing Overview Sections"
+	case health.OrphanedDocumentation:
+		return "Orphaned Documentation"
+	case health.EditorialAttention:
+		return "Editorial Attention"
+	default:
+		return string(kind)
 	}
 }

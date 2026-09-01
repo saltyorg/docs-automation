@@ -19,18 +19,23 @@ type GenerateOptions struct {
 }
 
 // Generate renders one role or all configured roles to the runner's output.
-func (r *Runner) Generate(ctx context.Context, cfg *config.Config, role string, opts GenerateOptions) error {
+func (r *Runner) Generate(ctx context.Context, cfg *config.Config, role string, opts GenerateOptions) (err error) {
+	defer func() { err = r.result(err) }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if role != "" {
-		return r.generateRole(ctx, cfg, role)
+	sources, err := loadSourceCatalog(cfg)
+	if err != nil {
+		return err
 	}
-	return r.generateAllRoles(ctx, cfg, opts.IncludeCLI)
+	if role != "" {
+		return r.generateRole(ctx, cfg, sources, role)
+	}
+	return r.generateAllRoles(ctx, cfg, sources, opts.IncludeCLI)
 }
 
 // generateRole generates documentation for a single role.
-func (r *Runner) generateRole(ctx context.Context, cfg *config.Config, roleName string) error {
+func (r *Runner) generateRole(ctx context.Context, cfg *config.Config, sources render.SourceCatalog, roleName string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -70,7 +75,7 @@ func (r *Runner) generateRole(ctx context.Context, cfg *config.Config, roleName 
 	}
 
 	// Build template data
-	data := render.BuildRoleData(roleInfo, cfg, fmConfig)
+	data := render.BuildRoleData(roleInfo, cfg, fmConfig, sources)
 
 	// Create template engine and render
 	engine := render.New()
@@ -88,7 +93,7 @@ func (r *Runner) generateRole(ctx context.Context, cfg *config.Config, roleName 
 }
 
 // generateAllRoles generates documentation for all roles.
-func (r *Runner) generateAllRoles(ctx context.Context, cfg *config.Config, includeCLI bool) error {
+func (r *Runner) generateAllRoles(ctx context.Context, cfg *config.Config, sources render.SourceCatalog, includeCLI bool) error {
 	// Get all saltbox roles
 	saltboxRoles, err := listRoles(cfg.SaltboxRolesPath())
 	if err != nil {
@@ -113,7 +118,7 @@ func (r *Runner) generateAllRoles(ctx context.Context, cfg *config.Config, inclu
 			return err
 		}
 		r.verbosef("Generating: %s (saltbox)\n", role)
-		if err := r.generateRoleWithType(ctx, cfg, role, "saltbox"); err != nil {
+		if err := r.generateRoleWithType(ctx, cfg, sources, role, "saltbox"); err != nil {
 			r.errorf("Warning: failed to generate %s: %v\n", role, err)
 		}
 	}
@@ -123,7 +128,7 @@ func (r *Runner) generateAllRoles(ctx context.Context, cfg *config.Config, inclu
 			return err
 		}
 		r.verbosef("Generating: %s (sandbox)\n", role)
-		if err := r.generateRoleWithType(ctx, cfg, role, "sandbox"); err != nil {
+		if err := r.generateRoleWithType(ctx, cfg, sources, role, "sandbox"); err != nil {
 			r.errorf("Warning: failed to generate %s: %v\n", role, err)
 		}
 	}
@@ -139,7 +144,7 @@ func (r *Runner) generateAllRoles(ctx context.Context, cfg *config.Config, inclu
 }
 
 // generateRoleWithType generates documentation for a role with known repo type.
-func (r *Runner) generateRoleWithType(ctx context.Context, cfg *config.Config, roleName, repoType string) error {
+func (r *Runner) generateRoleWithType(ctx context.Context, cfg *config.Config, sources render.SourceCatalog, roleName, repoType string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -186,7 +191,7 @@ func (r *Runner) generateRoleWithType(ctx context.Context, cfg *config.Config, r
 	}
 
 	// Build template data
-	data := render.BuildRoleData(roleInfo, cfg, fmConfig)
+	data := render.BuildRoleData(roleInfo, cfg, fmConfig, sources)
 
 	// Create template engine and render
 	engine := render.New()

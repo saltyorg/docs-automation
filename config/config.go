@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -23,6 +24,8 @@ type Config struct {
 	CLIHelp           CLIHelpConfig                `yaml:"cli_help"`
 	Markers           MarkersConfig                `yaml:"markers"`
 	Scaffold          ScaffoldConfig               `yaml:"scaffold"`
+	Checks            ChecksConfig                 `yaml:"checks"`
+	Issue             IssueConfig                  `yaml:"issue"`
 }
 
 // RepositoryConfig defines paths to the repositories.
@@ -110,6 +113,45 @@ type MarkersConfig struct {
 // ScaffoldConfig configures documentation scaffolding.
 type ScaffoldConfig struct {
 	OutputPaths map[string]string `yaml:"output_paths"`
+}
+
+// CheckConfig configures one docs-health check category.
+type CheckConfig struct {
+	Enabled      *bool    `yaml:"enabled"`
+	ExcludePaths []string `yaml:"exclude_paths"`
+	Statuses     []string `yaml:"statuses"`
+}
+
+// ChecksConfig configures the docs-health check categories.
+type ChecksConfig struct {
+	Coverage    CheckConfig `yaml:"coverage"`
+	Frontmatter CheckConfig `yaml:"frontmatter"`
+	Editorial   CheckConfig `yaml:"editorial"`
+}
+
+// IssueConfig configures issue metadata for docs-health reporting.
+type IssueConfig struct {
+	SourceRepositories map[string]SourceRepositoryConfig `yaml:"source_repositories"`
+}
+
+// SourceRepositoryConfig identifies a source repository for issue links.
+type SourceRepositoryConfig struct {
+	Slug string `yaml:"slug"`
+	Ref  string `yaml:"ref"`
+}
+
+// EnabledOr returns the configured enabled value or defaultValue when it is unset.
+func (c CheckConfig) EnabledOr(defaultValue bool) bool {
+	if c.Enabled == nil {
+		return defaultValue
+	}
+	return *c.Enabled
+}
+
+// Excludes reports whether relPath is excluded by this check configuration.
+func (c CheckConfig) Excludes(relPath string) bool {
+	clean := filepath.ToSlash(filepath.Clean(relPath))
+	return slices.Contains(c.ExcludePaths, clean)
 }
 
 type pathOverlay struct {
@@ -240,6 +282,21 @@ func (c *Config) Validate() error {
 	if err := validateDockerVariableTypes(c.DockerVariables); err != nil {
 		return err
 	}
+	for _, check := range []struct {
+		name   string
+		config *CheckConfig
+	}{
+		{name: "coverage", config: &c.Checks.Coverage},
+		{name: "frontmatter", config: &c.Checks.Frontmatter},
+		{name: "editorial", config: &c.Checks.Editorial},
+	} {
+		if err := validateCheckConfig(check.name, check.config); err != nil {
+			return err
+		}
+	}
+	if err := validateIssueConfig(c.Issue); err != nil {
+		return err
+	}
 
 	// Validate repository directories exist
 	if err := validateDirectory(c.Repositories.Saltbox, "repositories.saltbox"); err != nil {
@@ -330,6 +387,92 @@ func validateDockerOverrideGroups(groups []DockerOverrideGroup) error {
 	}
 
 	return nil
+}
+
+func validateCheckConfig(name string, check *CheckConfig) error {
+	if name != "editorial" && len(check.Statuses) > 0 {
+		return fmt.Errorf("checks.%s.statuses is only supported for editorial checks", name)
+	}
+	if name == "editorial" && check.EnabledOr(false) && len(check.Statuses) == 0 {
+		return fmt.Errorf("checks.editorial.statuses is required when editorial checks are enabled")
+	}
+	for i, status := range check.Statuses {
+		if strings.TrimSpace(status) == "" {
+			return fmt.Errorf("checks.%s.statuses[%d] must not be empty", name, i)
+		}
+	}
+
+	exclusions := make(map[string]struct{}, len(check.ExcludePaths))
+	for i, relPath := range check.ExcludePaths {
+		trimmed := strings.TrimSpace(relPath)
+		if trimmed == "" {
+			return fmt.Errorf("checks.%s.exclude_paths[%d] must not be empty", name, i)
+		}
+		if filepath.IsAbs(trimmed) {
+			return fmt.Errorf("checks.%s.exclude_paths[%d] must be relative", name, i)
+		}
+
+		clean := filepath.ToSlash(filepath.Clean(trimmed))
+		if clean == "." || clean == ".." || strings.HasPrefix(clean, "../") {
+			return fmt.Errorf("checks.%s.exclude_paths[%d] must not escape the docs root", name, i)
+		}
+		if _, exists := exclusions[clean]; exists {
+			return fmt.Errorf("checks.%s.exclude_paths contains duplicate path %q", name, clean)
+		}
+
+		exclusions[clean] = struct{}{}
+		check.ExcludePaths[i] = clean
+	}
+
+	return nil
+}
+
+func validateIssueConfig(issue IssueConfig) error {
+	for source, repository := range issue.SourceRepositories {
+		owner, name, found := strings.Cut(repository.Slug, "/")
+		if !found || strings.Contains(name, "/") || !validGitHubOwner(owner) || !validGitHubRepository(name) {
+			return fmt.Errorf("issue.source_repositories.%s.slug must use GitHub owner/repository syntax", source)
+		}
+		if strings.TrimSpace(repository.Ref) == "" {
+			return fmt.Errorf("issue.source_repositories.%s.ref is required", source)
+		}
+	}
+
+	return nil
+}
+
+func validGitHubOwner(owner string) bool {
+	if len(owner) == 0 || len(owner) > 39 || owner[0] == '-' || owner[len(owner)-1] == '-' {
+		return false
+	}
+	for i := range len(owner) {
+		if isASCIILetterOrDigit(owner[i]) {
+			continue
+		}
+		if owner[i] != '-' || (i > 0 && owner[i-1] == '-') {
+			return false
+		}
+	}
+	return true
+}
+
+func validGitHubRepository(name string) bool {
+	if len(name) == 0 || len(name) > 100 {
+		return false
+	}
+	for i := range len(name) {
+		if isASCIILetterOrDigit(name[i]) || name[i] == '.' || name[i] == '-' || name[i] == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func isASCIILetterOrDigit(value byte) bool {
+	return value >= 'a' && value <= 'z' ||
+		value >= 'A' && value <= 'Z' ||
+		value >= '0' && value <= '9'
 }
 
 // NormalizeDockerSuffix converts supported Docker override suffix forms to Docker+ form.

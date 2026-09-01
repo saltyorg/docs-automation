@@ -28,8 +28,7 @@ NOTE: This command is not yet implemented.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			runner := automation.NewRunner(cmd.OutOrStdout(), cmd.ErrOrStderr(), rootOpts.verbose)
-			runner.Index()
-			return nil
+			return runner.Index()
 		},
 	}
 }

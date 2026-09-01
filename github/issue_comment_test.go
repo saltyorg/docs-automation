@@ -1,137 +1,147 @@
 package github
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/saltyorg/docs-automation/health"
 )
 
-func TestExtractIssueCounts(t *testing.T) {
-	body := `## 📝 Documentation Status
+var testIssueCommentStateHash = regexp.MustCompile(`docs-automation-state-sha256:[0-9a-f]{64}`)
 
-### Missing Documentation (3)
-Roles without corresponding documentation pages:
-
-### Missing Variables Sections (4)
-Documentation pages without the managed variables section:
-
-### Missing Overview Sections (2)
-Documentation pages without the managed overview section:
-
-### Orphaned Documentation (1)
-Documentation pages without corresponding roles:
-`
-
-	counts := extractIssueCounts(body)
-
-	if counts.MissingDocs != 3 {
-		t.Fatalf("expected MissingDocs=3, got %d", counts.MissingDocs)
+func TestIssueRendererUpdateCommentGolden(t *testing.T) {
+	oldState := health.State{
+		Version: health.StateVersion,
+		Results: []health.StateResult{
+			{
+				Kind:    health.MissingDocumentation,
+				Enabled: true,
+				Findings: []health.StateFinding{
+					{ID: "radarr-id", Kind: health.MissingDocumentation, Label: "radarr"},
+					{ID: "sonarr-id", Kind: health.MissingDocumentation, Label: "sonarr"},
+				},
+			},
+			{
+				Kind:    health.EditorialAttention,
+				Enabled: true,
+				Findings: []health.StateFinding{
+					{ID: "draft-id", Kind: health.EditorialAttention, Label: "draft page"},
+				},
+			},
+		},
 	}
-	if counts.MissingSections != 4 {
-		t.Fatalf("expected MissingSections=4, got %d", counts.MissingSections)
+	newState := health.State{
+		Version: health.StateVersion,
+		Results: []health.StateResult{
+			{
+				Kind:    health.MissingDocumentation,
+				Enabled: true,
+				Findings: []health.StateFinding{
+					{ID: "lidarr-id", Kind: health.MissingDocumentation, Label: "lidarr"},
+					{ID: "radarr-id", Kind: health.MissingDocumentation, Label: "radarr"},
+				},
+			},
+			{
+				Kind:    health.EditorialAttention,
+				Enabled: true,
+				Findings: []health.StateFinding{
+					{ID: "draft-id", Kind: health.EditorialAttention, Label: "draft page"},
+				},
+			},
+		},
 	}
-	if counts.MissingOverviewSections != 2 {
-		t.Fatalf("expected MissingOverviewSections=2, got %d", counts.MissingOverviewSections)
+	run := health.RunInfo{
+		CheckedAt:   time.Date(2026, 9, 1, 14, 30, 0, 0, time.FixedZone("CEST", 2*60*60)),
+		WorkflowURL: "https://github.com/saltyorg/docs/actions/runs/123456",
 	}
-	if counts.OrphanedDocs != 1 {
-		t.Fatalf("expected OrphanedDocs=1, got %d", counts.OrphanedDocs)
+
+	comment := NewIssueRenderer("saltyorg/docs").UpdateComment(oldState, newState, run)
+	wantMarker := "<!-- docs-automation-state-sha256:" + testIssueStateHash(t, newState) + " -->"
+	if !strings.Contains(comment, wantMarker) {
+		t.Fatalf("UpdateComment() has no canonical state marker %q:\n%s", wantMarker, comment)
 	}
-}
-
-func TestExtractIssueCountsMissingHeadings(t *testing.T) {
-	counts := extractIssueCounts("## no section counts here")
-
-	if counts.MissingDocs != 0 || counts.MissingSections != 0 || counts.MissingOverviewSections != 0 || counts.OrphanedDocs != 0 {
-		t.Fatalf("expected all counts to default to zero, got %+v", counts)
+	normalized := testIssueCommentStateHash.ReplaceAllString(comment, "docs-automation-state-sha256:HASH")
+	want, err := os.ReadFile("testdata/issue_comment.golden.md")
+	if err != nil {
+		t.Fatalf("reading golden file: %v", err)
 	}
-}
-
-func TestBuildCompactLineDiff(t *testing.T) {
-	oldBody := "line1\nline2\nline3"
-	newBody := "line1\nline2-changed\nline3"
-
-	diff := buildCompactLineDiff(oldBody, newBody, 100)
-
-	if !strings.Contains(diff, "@@") {
-		t.Fatalf("expected unified hunk header in diff, got: %s", diff)
+	if normalized != string(want) {
+		t.Fatalf("UpdateComment() differs from golden output\n--- got ---\n%s\n--- want ---\n%s", normalized, want)
 	}
-	if !strings.Contains(diff, "-line2") {
-		t.Fatalf("expected removed line in diff, got: %s", diff)
-	}
-	if !strings.Contains(diff, "+line2-changed") {
-		t.Fatalf("expected added line in diff, got: %s", diff)
-	}
-}
-
-func TestGenerateIssueBodyUpdateComment(t *testing.T) {
-	t.Setenv("GITHUB_HEAD_REF", "")
-	t.Setenv("GITHUB_REF_NAME", "main")
-
-	oldBody := `## 📝 Documentation Status
-
-### Missing Documentation (2)
-
-### Missing Variables Sections (1)
-
-### Missing Overview Sections (1)
-
-### Orphaned Documentation (0)
-`
-	newBody := `## 📝 Documentation Status
-
-### Missing Documentation (1)
-
-### Missing Variables Sections (3)
-
-### Missing Overview Sections (1)
-
-### Orphaned Documentation (2)
-`
-
-	manager := NewIssueManager("owner/repo", "https://example.com/run/123")
-	comment := manager.GenerateIssueBodyUpdateComment(oldBody, newBody)
-
-	if !strings.Contains(comment, "### Docs Automation: Main Post Updated") {
-		t.Fatalf("missing update comment heading")
-	}
-	if !strings.Contains(comment, "Run: [workflow link](https://example.com/run/123)") {
-		t.Fatalf("missing workflow link")
-	}
-	if !strings.Contains(comment, "| Missing Documentation | 2 | 1 | -1 |") {
-		t.Fatalf("missing or incorrect Missing Documentation delta row")
-	}
-	if !strings.Contains(comment, "| Missing Variables Sections | 1 | 3 | +2 |") {
-		t.Fatalf("missing or incorrect Missing Variables Sections delta row")
-	}
-	if !strings.Contains(comment, "```diff") {
-		t.Fatalf("missing diff code block")
-	}
-	if !strings.Contains(comment, "<!-- docs-automation-body-sha256:") {
-		t.Fatalf("missing body hash marker")
+	if strings.Contains(comment, "Editorial Attention") {
+		t.Fatalf("UpdateComment() included an unchanged result row:\n%s", comment)
 	}
 }
 
-func TestNormalizeIssueBodyForChangeDetectionIgnoresWorkflowRunLine(t *testing.T) {
-	a := `## 📝 Documentation Status
-
-### Missing Documentation (1)
-
----
-**Workflow run:** [link](https://example.com/runs/100)
-*This issue is automatically managed by docs-automation*
-`
-	b := `## 📝 Documentation Status
-
-### Missing Documentation (1)
-
----
-**Workflow run:** [link](https://example.com/runs/200)
-*This issue is automatically managed by docs-automation*
-`
-
-	na := normalizeIssueBodyForChangeDetection(a)
-	nb := normalizeIssueBodyForChangeDetection(b)
-
-	if na != nb {
-		t.Fatalf("expected normalized bodies to match when only workflow run URL differs")
+func TestIssueRendererUpdateCommentCapsAddedAndResolvedFindings(t *testing.T) {
+	oldFindings := make([]health.StateFinding, 30)
+	newFindings := make([]health.StateFinding, 30)
+	for i := range 30 {
+		oldFindings[i] = health.StateFinding{
+			ID:    "old-" + twoDigits(i),
+			Kind:  health.OrphanedDocumentation,
+			Label: "resolved-" + twoDigits(i),
+		}
+		newFindings[i] = health.StateFinding{
+			ID:    "new-" + twoDigits(i),
+			Kind:  health.MissingDocumentation,
+			Label: "added-" + twoDigits(i),
+		}
 	}
+	oldState := health.State{Version: health.StateVersion, Results: []health.StateResult{{
+		Kind: health.OrphanedDocumentation, Enabled: true, Findings: oldFindings,
+	}}}
+	newState := health.State{Version: health.StateVersion, Results: []health.StateResult{{
+		Kind: health.MissingDocumentation, Enabled: true, Findings: newFindings,
+	}}}
+
+	comment := NewIssueRenderer("saltyorg/docs").UpdateComment(oldState, newState, health.RunInfo{})
+	for _, want := range []string{
+		"- Missing Documentation: added-24",
+		"5 additional added findings omitted.",
+		"- Orphaned Documentation: resolved-24",
+		"5 additional resolved findings omitted.",
+	} {
+		if !strings.Contains(comment, want) {
+			t.Errorf("UpdateComment() missing %q:\n%s", want, comment)
+		}
+	}
+	for _, notWant := range []string{"added-25", "resolved-25"} {
+		if strings.Contains(comment, notWant) {
+			t.Errorf("UpdateComment() rendered finding beyond cap %q:\n%s", notWant, comment)
+		}
+	}
+}
+
+func TestIssueRendererUpdateCommentEscapesLiteralMarkdownCharacters(t *testing.T) {
+	oldState := health.State{Version: health.StateVersion, Results: []health.StateResult{{
+		Kind: health.MissingDocumentation, Enabled: true,
+	}}}
+	newState := health.State{Version: health.StateVersion, Results: []health.StateResult{{
+		Kind: health.MissingDocumentation, Enabled: true,
+		Findings: []health.StateFinding{{
+			ID: "literal-markdown", Kind: health.MissingDocumentation, Label: "role*under_score~old",
+		}},
+	}}}
+
+	comment := NewIssueRenderer("saltyorg/docs").UpdateComment(oldState, newState, health.RunInfo{})
+	if !strings.Contains(comment, `role\*under\_score\~old`) {
+		t.Fatalf("UpdateComment() did not render the label literally:\n%s", comment)
+	}
+}
+
+func testIssueStateHash(t *testing.T, state health.State) string {
+	t.Helper()
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshalling test state: %v", err)
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
 }

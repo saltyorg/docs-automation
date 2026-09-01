@@ -440,9 +440,6 @@ func ScanInventoryForRoleVarLookups(inventoryPath string, ignoreSuffixes []strin
 
 	file, err := os.Open(inventoryPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return lookups, nil // Return empty map if file doesn't exist
-		}
 		return nil, err
 	}
 	defer func() { _ = file.Close() }()

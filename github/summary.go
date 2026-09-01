@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/saltyorg/docs-automation/health"
 )
 
 // RoleStatus represents the processing status of a role.
@@ -29,14 +31,14 @@ type RoleResult struct {
 
 // UpdateSummary holds the complete summary of an update run.
 type UpdateSummary struct {
-	Roles       []RoleResult
-	CLIUpdated  bool
-	TotalRoles  int
-	Updated     int
-	Unchanged   int
-	Skipped     int
-	Errors      int
-	CheckResult *CheckResult // optional check results
+	Roles        []RoleResult
+	CLIUpdated   bool
+	TotalRoles   int
+	Updated      int
+	Unchanged    int
+	Skipped      int
+	Errors       int
+	HealthReport *health.Report
 }
 
 // NewUpdateSummary creates a new UpdateSummary.
@@ -63,9 +65,9 @@ func (s *UpdateSummary) AddRole(result RoleResult) {
 	}
 }
 
-// SetCheckResult sets the check results for the summary.
-func (s *UpdateSummary) SetCheckResult(result *CheckResult) {
-	s.CheckResult = result
+// SetHealthReport sets the canonical documentation health report.
+func (s *UpdateSummary) SetHealthReport(report *health.Report) {
+	s.HealthReport = report
 }
 
 // WriteGitHubSummary writes the summary to GITHUB_STEP_SUMMARY if running in GitHub Actions.
@@ -120,7 +122,7 @@ func (s *UpdateSummary) WriteGitHubSummary() error {
 			if len(r.Sections) > 0 {
 				sections = strings.Join(r.Sections, ", ")
 			}
-			fmt.Fprintf(&sb, "| %s | %s | %s |\n", r.Name, r.RepoType, sections)
+			fmt.Fprintf(&sb, "| %s | %s | %s |\n", markdownTableCell(r.Name), markdownTableCell(r.RepoType), markdownTableCell(sections))
 		}
 		sb.WriteString("\n")
 
@@ -138,7 +140,7 @@ func (s *UpdateSummary) WriteGitHubSummary() error {
 		sb.WriteString("| Role | Repository | Reason |\n")
 		sb.WriteString("|------|------------|--------|\n")
 		for _, r := range skippedRoles {
-			fmt.Fprintf(&sb, "| %s | %s | %s |\n", r.Name, r.RepoType, r.SkipReason)
+			fmt.Fprintf(&sb, "| %s | %s | %s |\n", markdownTableCell(r.Name), markdownTableCell(r.RepoType), markdownTableCell(r.SkipReason))
 		}
 		sb.WriteString("\n</details>\n\n")
 	}
@@ -151,57 +153,80 @@ func (s *UpdateSummary) WriteGitHubSummary() error {
 		sb.WriteString("| Role | Repository | Error |\n")
 		sb.WriteString("|------|------------|-------|\n")
 		for _, r := range errorRoles {
-			// Escape pipe characters in error messages
-			errMsg := strings.ReplaceAll(r.Error, "|", "\\|")
-			fmt.Fprintf(&sb, "| %s | %s | %s |\n", r.Name, r.RepoType, errMsg)
+			fmt.Fprintf(&sb, "| %s | %s | %s |\n", markdownTableCell(r.Name), markdownTableCell(r.RepoType), markdownTableCell(r.Error))
 		}
 		sb.WriteString("\n")
 	}
 
-	// Check results if available
-	if s.CheckResult != nil && s.CheckResult.HasIssues() {
-		sb.WriteString("### 🔍 Coverage Check Results\n\n")
-
-		if len(s.CheckResult.MissingDocs) > 0 {
-			fmt.Fprintf(&sb, "**Missing Documentation:** %d roles\n", len(s.CheckResult.MissingDocs))
-			sb.WriteString("<details>\n<summary>Show roles</summary>\n\n")
-			for _, role := range s.CheckResult.MissingDocs {
-				fmt.Fprintf(&sb, "- `%s`\n", role)
-			}
-			sb.WriteString("\n</details>\n\n")
-		}
-
-		if len(s.CheckResult.MissingSections) > 0 {
-			fmt.Fprintf(&sb, "**Missing Variables Sections:** %d docs\n", len(s.CheckResult.MissingSections))
-			sb.WriteString("<details>\n<summary>Show docs</summary>\n\n")
-			for _, doc := range s.CheckResult.MissingSections {
-				fmt.Fprintf(&sb, "- `%s`\n", doc)
-			}
-			sb.WriteString("\n</details>\n\n")
-		}
-
-		if len(s.CheckResult.MissingOverviewSections) > 0 {
-			fmt.Fprintf(&sb, "**Missing Overview Sections:** %d docs\n", len(s.CheckResult.MissingOverviewSections))
-			sb.WriteString("<details>\n<summary>Show docs</summary>\n\n")
-			for _, doc := range s.CheckResult.MissingOverviewSections {
-				fmt.Fprintf(&sb, "- `%s`\n", doc)
-			}
-			sb.WriteString("\n</details>\n\n")
-		}
-
-		if len(s.CheckResult.OrphanedDocs) > 0 {
-			fmt.Fprintf(&sb, "**Orphaned Documentation:** %d docs\n", len(s.CheckResult.OrphanedDocs))
-			sb.WriteString("<details>\n<summary>Show docs</summary>\n\n")
-			for _, doc := range s.CheckResult.OrphanedDocs {
-				fmt.Fprintf(&sb, "- `%s`\n", doc)
-			}
-			sb.WriteString("\n</details>\n\n")
-		}
+	if s.HealthReport != nil {
+		writeHealthReport(&sb, *s.HealthReport)
 	}
 
 	_, writeErr := f.WriteString(sb.String())
 	closeErr := f.Close()
 	return errors.Join(writeErr, closeErr)
+}
+
+func writeHealthReport(sb *strings.Builder, report health.Report) {
+	report = report.Canonical()
+	sb.WriteString("### 🩺 Documentation Health\n\n")
+	sb.WriteString("| Check | Status | Findings | Exemptions |\n")
+	sb.WriteString("|-------|--------|----------|------------|\n")
+	for _, result := range report.Results {
+		status := "Disabled"
+		if result.Enabled && len(result.Findings) == 0 {
+			status = "Passed"
+		} else if result.Enabled {
+			status = "Enabled"
+		}
+		fmt.Fprintf(sb, "| %s | %s | %d | %d |\n", markdownTableCell(healthResultLabel(result.Kind)), status, len(result.Findings), result.Exemptions)
+	}
+	sb.WriteString("\n")
+
+	for _, result := range report.Results {
+		if !result.Enabled || len(result.Findings) == 0 {
+			continue
+		}
+		fmt.Fprintf(sb, "### %s (%d)\n\n", markdownIssueText(healthResultLabel(result.Kind)), len(result.Findings))
+		sb.WriteString("| Repository | Subject | Path | Detail |\n")
+		sb.WriteString("|------------|---------|------|--------|\n")
+		for _, finding := range result.Findings {
+			fmt.Fprintf(sb, "| %s | %s | %s | %s |\n",
+				markdownTableCell(finding.Repository),
+				markdownTableCell(finding.Label()),
+				markdownTableCell(finding.Path),
+				markdownTableCell(finding.Detail),
+			)
+		}
+		sb.WriteString("\n")
+	}
+}
+
+func healthResultLabel(kind health.Kind) string {
+	switch kind {
+	case health.RoleAutomationError:
+		return "Role Automation Errors"
+	case health.CLIHelpAutomationError:
+		return "CLI Help Automation Errors"
+	case health.MissingDocumentation:
+		return "Missing Documentation"
+	case health.InvalidFrontmatter:
+		return "Invalid Frontmatter"
+	case health.MissingVariablesSection:
+		return "Missing Variables Sections"
+	case health.MissingOverviewSection:
+		return "Missing Overview Sections"
+	case health.OrphanedDocumentation:
+		return "Orphaned Documentation"
+	case health.EditorialAttention:
+		return "Editorial Attention"
+	default:
+		return string(kind)
+	}
+}
+
+func markdownTableCell(value string) string {
+	return markdownIssueText(value)
 }
 
 // getRolesByStatus returns all roles with the given status.

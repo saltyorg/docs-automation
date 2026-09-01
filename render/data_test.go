@@ -1,7 +1,6 @@
 package render
 
 import (
-	"os"
 	"path/filepath"
 	"slices"
 	"testing"
@@ -41,7 +40,7 @@ func TestBuildRoleDataAppliesDockerOverrideMetadata(t *testing.T) {
 		},
 	}
 
-	data := BuildRoleData(role, cfg, nil)
+	data := BuildRoleData(role, cfg, nil, SourceCatalog{})
 	got := data.Sections["Docker"].Variables[0]
 	if got.Comment != "GPU" {
 		t.Fatalf("comment = %q, want original role comment", got.Comment)
@@ -59,7 +58,7 @@ func TestBuildRoleDataAppliesDockerOverrideMetadata(t *testing.T) {
 		t.Fatalf("raw value = %q, want role default to remain unchanged", got.RawValue)
 	}
 
-	legacyData := BuildRoleData(role, &config.Config{}, nil)
+	legacyData := BuildRoleData(role, &config.Config{}, nil, SourceCatalog{})
 	legacyVar := legacyData.Sections["Docker"].Variables[0]
 	if legacyVar.Comment != "GPU" {
 		t.Fatalf("legacy comment = %q, want original role comment", legacyVar.Comment)
@@ -93,35 +92,20 @@ func TestBuildRoleDataAppliesSectionExplainer(t *testing.T) {
 		},
 	}
 
-	data := BuildRoleData(role, cfg, nil)
+	data := BuildRoleData(role, cfg, nil, SourceCatalog{})
 	if got, want := data.Sections["Ports"].Explainer, "Ports stay stable across runs.\n\n  Explicit conflicts always fail."; got != want {
 		t.Fatalf("Ports explainer = %q, want %q", got, want)
 	}
 
-	legacyData := BuildRoleData(role, &config.Config{}, nil)
+	legacyData := BuildRoleData(role, &config.Config{}, nil, SourceCatalog{})
 	if got := legacyData.Sections["Ports"].Explainer; got != "" {
 		t.Fatalf("legacy Ports explainer = %q, want empty", got)
 	}
 }
 
 func TestBuildDockerInfoPreservesUnconfiguredVariablesAndAddsMetadata(t *testing.T) {
-	root := t.TempDir()
-	tasksDir := filepath.Join(root, "resources", "tasks", "docker")
-	if err := os.MkdirAll(tasksDir, 0o755); err != nil {
-		t.Fatalf("creating Docker task directory: %v", err)
-	}
-	content := `
-- name: Test Docker variables
-  ansible.builtin.set_fact:
-    gpu: "{{ lookup('docker_var', '_docker_gpu_enabled', default=false) }}"
-    custom: "{{ lookup('docker_var', '_docker_custom_option', default='') }}"
-`
-	if err := os.WriteFile(filepath.Join(tasksDir, "create.yml"), []byte(content), 0o644); err != nil {
-		t.Fatalf("writing Docker task fixture: %v", err)
-	}
 	defaultValue := "false"
 	cfg := &config.Config{
-		Repositories: config.RepositoryConfig{Saltbox: root},
 		DockerOverrides: config.DockerOverrides{
 			Variables: map[string]config.OverrideVarDef{
 				"_docker_gpu_enabled": {
@@ -133,7 +117,8 @@ func TestBuildDockerInfoPreservesUnconfiguredVariablesAndAddsMetadata(t *testing
 		},
 	}
 
-	info := buildDockerInfo(cfg, "example", nil)
+	suffixes := []string{"custom_option", "gpu_enabled"}
+	info := buildDockerInfo(cfg, "example", nil, suffixes)
 	if info == nil {
 		t.Fatal("DockerInfo is nil")
 	}
@@ -159,7 +144,7 @@ func TestBuildDockerInfoPreservesUnconfiguredVariablesAndAddsMetadata(t *testing
 		t.Fatalf("other options = %v, want existing and configured variables", other)
 	}
 
-	legacyInfo := buildDockerInfo(&config.Config{Repositories: config.RepositoryConfig{Saltbox: root}}, "example", nil)
+	legacyInfo := buildDockerInfo(&config.Config{}, "example", nil, suffixes)
 	if legacyInfo == nil {
 		t.Fatal("legacy DockerInfo is nil")
 	}
@@ -211,7 +196,7 @@ func TestBuildRoleDataPromotesCompleteDockerOverrideGroup(t *testing.T) {
 			role.HasInstances = true
 			role.InstancesVar = "plex_instances"
 			cfg := dockerGroupTestConfig("")
-			data := BuildRoleData(role, cfg, nil)
+			data := BuildRoleData(role, cfg, nil, SourceCatalog{})
 			got := data.Sections["Docker"].Variables
 
 			wantNames := []string{
@@ -253,13 +238,13 @@ func TestBuildRoleDataPromotesCompleteDockerOverrideGroup(t *testing.T) {
 }
 
 func TestBuildRoleDataPlacesCompleteGroupInDockerPlusWhenPrimaryIsAbsent(t *testing.T) {
-	root := writeDockerScannerFixture(t, []string{
+	dockerVarSuffixes := []string{
 		"gpu_enabled",
 		"nvidia_disabled",
 		"dev_dri_disabled",
 		"custom_option",
-	})
-	cfg := dockerGroupTestConfig(root)
+	}
+	cfg := dockerGroupTestConfig("")
 	role := dockerTestRole("example", []parser.Variable{{
 		Name:     "example_role_docker_container",
 		RawValue: `"example"`,
@@ -267,7 +252,7 @@ func TestBuildRoleDataPlacesCompleteGroupInDockerPlusWhenPrimaryIsAbsent(t *test
 		Comment:  "Container",
 	}})
 
-	data := BuildRoleData(role, cfg, nil)
+	data := BuildRoleData(role, cfg, nil, SourceCatalog{DockerVarSuffixes: dockerVarSuffixes})
 	if data.DockerInfo == nil {
 		t.Fatal("DockerInfo is nil")
 	}
@@ -287,14 +272,13 @@ func TestBuildRoleDataPlacesCompleteGroupInDockerPlusWhenPrimaryIsAbsent(t *test
 }
 
 func TestBuildRoleDataUsesConfiguredDockerVariableType(t *testing.T) {
-	root := writeDockerScannerFixture(t, []string{"sysctls"})
-	cfg := dockerGroupTestConfig(root)
+	cfg := dockerGroupTestConfig("")
 	cfg.DockerVariables.Dict = []string{"sysctls"}
 	role := dockerTestRole("example", []parser.Variable{
 		{Name: "example_role_docker_container", RawValue: `"example"`, Section: "Docker"},
 	})
 
-	data := BuildRoleData(role, cfg, nil)
+	data := BuildRoleData(role, cfg, nil, SourceCatalog{DockerVarSuffixes: []string{"sysctls"}})
 	if data.DockerInfo == nil {
 		t.Fatal("BuildRoleData() DockerInfo is nil")
 	}
@@ -303,20 +287,42 @@ func TestBuildRoleDataUsesConfiguredDockerVariableType(t *testing.T) {
 	}
 }
 
+func TestBuildRoleDataUsesExplicitSourceCatalog(t *testing.T) {
+	role := dockerTestRole("example", []parser.Variable{
+		{Name: "example_role_docker_container", RawValue: `"example"`, Section: "Docker"},
+	})
+	role.HasWeb = true
+	cfg := &config.Config{
+		Repositories: config.RepositoryConfig{Saltbox: filepath.Join(t.TempDir(), "missing")},
+	}
+	sources := SourceCatalog{
+		RoleVarLookups:    map[string]string{"_web_host_override": parser.String},
+		DockerVarSuffixes: []string{"custom_option"},
+	}
+
+	data := BuildRoleData(role, cfg, nil, sources)
+	if got := data.RoleVarLookups["_web_host_override"]; got == nil || got.Type != parser.String {
+		t.Fatalf("RoleVarLookups = %v, want string web host override", data.RoleVarLookups)
+	}
+	if data.DockerInfo == nil || !slices.Contains(data.DockerInfo.Categories["Other Options"], "custom_option") {
+		t.Fatalf("DockerInfo = %#v, want custom_option", data.DockerInfo)
+	}
+}
+
 func TestBuildRoleDataRemovesPromotedGroupFromDockerPlus(t *testing.T) {
-	root := writeDockerScannerFixture(t, []string{
+	dockerVarSuffixes := []string{
 		"gpu_enabled",
 		"nvidia_disabled",
 		"dev_dri_disabled",
 		"custom_option",
-	})
-	cfg := dockerGroupTestConfig(root)
+	}
+	cfg := dockerGroupTestConfig("")
 	role := dockerTestRole("plex", []parser.Variable{
 		{Name: "plex_role_docker_gpu_enabled", RawValue: "true", Section: "Docker", Comment: "GPU"},
 		{Name: "plex_role_docker_container", RawValue: `"plex"`, Section: "Docker", Comment: "Container"},
 	})
 
-	data := BuildRoleData(role, cfg, nil)
+	data := BuildRoleData(role, cfg, nil, SourceCatalog{DockerVarSuffixes: dockerVarSuffixes})
 	if data.DockerInfo == nil {
 		t.Fatal("DockerInfo is nil")
 	}
@@ -340,10 +346,8 @@ func TestBuildRoleDataRemovesPromotedGroupFromDockerPlus(t *testing.T) {
 }
 
 func TestBuildDockerInfoUsesConfiguredGroupWithoutGPUNames(t *testing.T) {
-	root := writeDockerScannerFixture(t, []string{"accelerator_enabled", "accelerator_mode"})
 	defaultValue := "false"
 	cfg := &config.Config{
-		Repositories: config.RepositoryConfig{Saltbox: root},
 		DockerOverrides: config.DockerOverrides{
 			Groups: []config.DockerOverrideGroup{{
 				Name:       "Acceleration",
@@ -357,13 +361,25 @@ func TestBuildDockerInfoUsesConfiguredGroupWithoutGPUNames(t *testing.T) {
 		},
 	}
 
-	info := buildDockerInfo(cfg, "example", nil)
+	info := buildDockerInfo(cfg, "example", nil, []string{"accelerator_enabled", "accelerator_mode"})
 	if info == nil {
 		t.Fatal("DockerInfo is nil")
 	}
 	want := []string{"accelerator_enabled", "accelerator_mode"}
 	if got := info.Categories["Acceleration"]; !slices.Equal(got, want) {
 		t.Fatalf("Acceleration category = %v, want %v", got, want)
+	}
+}
+
+func TestBuildDockerInfoPreservesLegacyNonRolePrefixBehavior(t *testing.T) {
+	info := buildDockerInfo(
+		&config.Config{},
+		"n8n",
+		[]string{"n8n_docker_create_timeout"},
+		[]string{"create_timeout"},
+	)
+	if info == nil || !slices.Contains(info.Categories["Other Options"], "create_timeout") {
+		t.Fatalf("DockerInfo = %#v, want legacy create_timeout Docker+ option", info)
 	}
 }
 
@@ -397,23 +413,6 @@ func dockerTestRole(name string, variables []parser.Variable) *parser.RoleInfo {
 		},
 		AllVariables: variables,
 	}
-}
-
-func writeDockerScannerFixture(t *testing.T, suffixes []string) string {
-	t.Helper()
-	root := t.TempDir()
-	tasksDir := filepath.Join(root, "resources", "tasks", "docker")
-	if err := os.MkdirAll(tasksDir, 0o755); err != nil {
-		t.Fatalf("creating Docker task directory: %v", err)
-	}
-	content := "---\n- name: Test Docker variables\n  vars:\n    _docker_var_specs:\n"
-	for _, suffix := range suffixes {
-		content += "      _docker_" + suffix + ":\n        omit: true\n"
-	}
-	if err := os.WriteFile(filepath.Join(tasksDir, "create.yml"), []byte(content), 0o644); err != nil {
-		t.Fatalf("writing Docker task fixture: %v", err)
-	}
-	return root
 }
 
 func variableNames(variables []*VariableData) []string {

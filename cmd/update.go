@@ -31,7 +31,7 @@ With a role argument, updates only that role (no CLI by default).`,
 		},
 	}
 	cmd.Flags().BoolVar(&opts.NoCLI, "no-cli", false, "exclude CLI help generation")
-	cmd.Flags().BoolVar(&opts.RunCheck, "check", false, "run coverage checks after updating")
+	cmd.Flags().BoolVar(&opts.RunCheck, "check", false, "run configured documentation-health checks after updating")
 	cmd.Flags().BoolVar(&opts.ManageIssue, "manage-issue", false, "create/update/close GitHub issue based on check results (requires --check and gh CLI)")
 	cmd.Flags().StringVar(&opts.IssueLabel, "issue-label", "docs-automation", "label to use for the managed GitHub issue")
 	return cmd

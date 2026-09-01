@@ -47,7 +47,7 @@ func (m *Manager) LoadDocument(path string) (*Document, error) {
 
 // SaveDocument writes the document back to disk.
 func (m *Manager) SaveDocument(doc *Document) error {
-	return os.WriteFile(doc.Path, []byte(doc.Content), 0644)
+	return WriteFileAtomic(doc.Path, []byte(doc.Content), 0o644, true)
 }
 
 // UpdateVariablesSection updates the managed variables section in a document.

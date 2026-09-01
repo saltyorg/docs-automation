@@ -4,13 +4,22 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"testing"
 )
+
+type closedWriter struct{}
+
+func (closedWriter) Write([]byte) (int, error) {
+	return 0, io.ErrClosedPipe
+}
 
 func TestRunnerIndexUsesConfiguredOutput(t *testing.T) {
 	var output bytes.Buffer
 	runner := NewRunner(&output, new(bytes.Buffer), false)
-	runner.Index()
+	if err := runner.Index(); err != nil {
+		t.Fatalf("Index() error = %v", err)
+	}
 
 	want := "Index generation is not yet implemented.\n\n" +
 		"This command will eventually:\n" +
@@ -19,6 +28,13 @@ func TestRunnerIndexUsesConfiguredOutput(t *testing.T) {
 		"  3. Generate categorized index.md files\n"
 	if output.String() != want {
 		t.Fatalf("output = %q, want %q", output.String(), want)
+	}
+}
+
+func TestRunnerIndexReturnsOutputError(t *testing.T) {
+	runner := NewRunner(closedWriter{}, new(bytes.Buffer), false)
+	if err := runner.Index(); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("Index() error = %v, want io.ErrClosedPipe", err)
 	}
 }
 

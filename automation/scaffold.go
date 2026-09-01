@@ -1,14 +1,18 @@
 package automation
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
 	"text/template"
 
 	"github.com/saltyorg/docs-automation/config"
+	"github.com/saltyorg/docs-automation/document"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -30,7 +34,8 @@ type ScaffoldData struct {
 }
 
 // Scaffold creates a new documentation file for a role.
-func (r *Runner) Scaffold(ctx context.Context, cfg *config.Config, roleName string, opts ScaffoldOptions) error {
+func (r *Runner) Scaffold(ctx context.Context, cfg *config.Config, roleName string, opts ScaffoldOptions) (err error) {
+	defer func() { err = r.result(err) }()
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -86,24 +91,22 @@ func (r *Runner) Scaffold(ctx context.Context, cfg *config.Config, roleName stri
 		return fmt.Errorf("loading template %s: %w", templatePath, err)
 	}
 
-	// Ensure output directory exists
-	if err := os.MkdirAll(filepath.Dir(outputPath), 0755); err != nil {
-		return fmt.Errorf("creating output directory: %w", err)
-	}
-
-	// Create output file
-	file, err := os.Create(outputPath)
-	if err != nil {
-		return fmt.Errorf("creating output file: %w", err)
-	}
-
-	// Execute template
-	if err := tmpl.Execute(file, data); err != nil {
-		_ = file.Close()
+	var output bytes.Buffer
+	if err := tmpl.Execute(&output, data); err != nil {
 		return fmt.Errorf("executing template: %w", err)
 	}
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("closing output file: %w", err)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	if err := os.MkdirAll(filepath.Dir(outputPath), 0o755); err != nil {
+		return fmt.Errorf("creating output directory: %w", err)
+	}
+	if err := document.WriteFileAtomic(outputPath, output.Bytes(), 0o644, opts.Force); err != nil {
+		if !opts.Force && errors.Is(err, fs.ErrExist) {
+			return fmt.Errorf("file %s already exists (use --force to overwrite)", outputPath)
+		}
+		return fmt.Errorf("writing output file: %w", err)
 	}
 
 	r.printf("Created %s\n", outputPath)

@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -36,14 +37,11 @@ func (s *DockerVarScanner) FindDockerVarLookups() ([]string, error) {
 		return mapKeys(s.cache), nil
 	}
 
-	s.cache = make(map[string]bool)
+	cache := make(map[string]bool)
 	dockerTasksPath := filepath.Join(s.resourcesPath, "tasks", "docker")
 
 	entries, err := os.ReadDir(dockerTasksPath)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
 		return nil, err
 	}
 
@@ -55,7 +53,7 @@ func (s *DockerVarScanner) FindDockerVarLookups() ([]string, error) {
 		filePath := filepath.Join(dockerTasksPath, entry.Name())
 		content, err := os.ReadFile(filePath)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("reading docker task %s: %w", filePath, err)
 		}
 
 		matches := dockerVarLookupRe.FindAllStringSubmatch(string(content), -1)
@@ -63,14 +61,15 @@ func (s *DockerVarScanner) FindDockerVarLookups() ([]string, error) {
 			if len(match) > 1 {
 				// Strip the leading _docker_ prefix if present
 				suffix := strings.TrimPrefix(match[1], "_docker_")
-				s.cache[suffix] = true
+				cache[suffix] = true
 			}
 		}
 
-		addDockerVarSpecsToCache(s.cache, content)
+		addDockerVarSpecsToCache(cache, content)
 	}
 
-	return mapKeys(s.cache), nil
+	s.cache = cache
+	return mapKeys(cache), nil
 }
 
 // addDockerVarSpecsToCache collects docker var suffixes from _docker_var_specs mappings.

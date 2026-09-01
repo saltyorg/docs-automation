@@ -81,6 +81,68 @@ repositories:
 	}
 }
 
+func TestLoadPathOverlayInheritsChecksAndIssueMetadata(t *testing.T) {
+	root := t.TempDir()
+	basePath := filepath.Join(root, "canonical", ".docs-automation.yml")
+	overlayPath := filepath.Join(root, "local", "config.yml")
+	saltboxPath := filepath.Join(root, "repos", "saltbox")
+	sandboxPath := filepath.Join(root, "repos", "sandbox")
+	docsPath := filepath.Join(root, "repos", "docs")
+	for _, path := range []string{
+		filepath.Join(saltboxPath, "roles"),
+		filepath.Join(sandboxPath, "roles"),
+		docsPath,
+	} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatalf("creating fixture directory: %v", err)
+		}
+	}
+	writeConfigFixture(t, basePath, `
+repositories:
+  saltbox: /canonical/saltbox
+  sandbox: /canonical/sandbox
+  docs: /canonical/docs
+markers:
+  variables: VARIABLES
+checks:
+  coverage:
+    enabled: true
+    exclude_paths: [docs/apps/lean.md]
+  editorial:
+    enabled: true
+    statuses: [draft2, outdated]
+issue:
+  source_repositories:
+    saltbox:
+      slug: saltyorg/Saltbox
+      ref: master
+`)
+	writeConfigFixture(t, overlayPath, `
+extends: ../canonical/.docs-automation.yml
+repositories:
+  saltbox: `+saltboxPath+`
+  sandbox: `+sandboxPath+`
+  docs: `+docsPath+`
+`)
+
+	cfg, err := Load(overlayPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if got := cfg.Repositories; got != (RepositoryConfig{Saltbox: saltboxPath, Sandbox: sandboxPath, Docs: docsPath}) {
+		t.Fatalf("repositories = %#v, want overlay paths", got)
+	}
+	if !cfg.Checks.Coverage.EnabledOr(false) || !cfg.Checks.Coverage.Excludes("docs/apps/lean.md") {
+		t.Fatalf("coverage checks = %#v, want inherited enabled exclusion", cfg.Checks.Coverage)
+	}
+	if !cfg.Checks.Editorial.EnabledOr(false) || len(cfg.Checks.Editorial.Statuses) != 2 {
+		t.Fatalf("editorial checks = %#v, want inherited enabled statuses", cfg.Checks.Editorial)
+	}
+	if got := cfg.Issue.SourceRepositories["saltbox"]; got != (SourceRepositoryConfig{Slug: "saltyorg/Saltbox", Ref: "master"}) {
+		t.Fatalf("saltbox source repository = %#v, want inherited metadata", got)
+	}
+}
+
 func TestLoadPathOverlayRejectsEmptyExtends(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yml")
 	writeConfigFixture(t, path, "extends: \"\"\nrepositories:\n  docs: /tmp/docs\n")
@@ -221,6 +283,158 @@ func TestLoadStandaloneConfigRemainsSupported(t *testing.T) {
 
 	if _, err := Load(path); err != nil {
 		t.Fatalf("Load() standalone config error = %v", err)
+	}
+}
+
+func TestLoadChecks(t *testing.T) {
+	root := t.TempDir()
+	saltboxPath := filepath.Join(root, "saltbox")
+	sandboxPath := filepath.Join(root, "sandbox")
+	docsPath := filepath.Join(root, "docs")
+	for _, directory := range []string{filepath.Join(saltboxPath, "roles"), filepath.Join(sandboxPath, "roles"), docsPath} {
+		if err := os.MkdirAll(directory, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	path := filepath.Join(root, "config.yml")
+	writeConfigFixture(t, path, `
+repositories:
+  saltbox: `+saltboxPath+`
+  sandbox: `+sandboxPath+`
+  docs: `+docsPath+`
+markers:
+  variables: VARIABLES
+checks:
+  coverage:
+    enabled: true
+    exclude_paths:
+      - docs/apps/../apps/lean.md
+  frontmatter:
+    enabled: false
+  editorial:
+    enabled: true
+    statuses: [draft2, outdated]
+issue:
+  source_repositories:
+    saltbox:
+      slug: saltyorg/Saltbox
+      ref: master
+`)
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.Checks.Coverage.EnabledOr(false) {
+		t.Fatal("coverage enabled = false, want true")
+	}
+	if cfg.Checks.Frontmatter.EnabledOr(true) {
+		t.Fatal("frontmatter enabled = true, want false")
+	}
+	if !cfg.Checks.Editorial.EnabledOr(false) {
+		t.Fatal("editorial enabled = false, want true")
+	}
+	if got := (CheckConfig{}).EnabledOr(true); !got {
+		t.Fatalf("unset enabled = %t, want default true", got)
+	}
+	if got := cfg.Checks.Coverage.ExcludePaths; len(got) != 1 || got[0] != "docs/apps/lean.md" {
+		t.Fatalf("coverage exclusions = %#v, want normalized docs/apps/lean.md", got)
+	}
+	if !cfg.Checks.Coverage.Excludes("docs/apps/lean.md") {
+		t.Fatal("coverage exclusion did not match normalized path")
+	}
+	if got := cfg.Checks.Editorial.Statuses; len(got) != 2 || got[0] != "draft2" || got[1] != "outdated" {
+		t.Fatalf("editorial statuses = %#v, want draft2 and outdated", got)
+	}
+	if got := cfg.Issue.SourceRepositories["saltbox"]; got != (SourceRepositoryConfig{Slug: "saltyorg/Saltbox", Ref: "master"}) {
+		t.Fatalf("saltbox source repository = %#v", got)
+	}
+}
+
+func TestValidateCheckConfig(t *testing.T) {
+	enabled := true
+	tests := []struct {
+		name      string
+		checkName string
+		check     CheckConfig
+		wantErr   bool
+	}{
+		{name: "valid coverage exclusion", checkName: "coverage", check: CheckConfig{ExcludePaths: []string{"docs/apps/lean.md"}}},
+		{name: "absolute exclusion", checkName: "coverage", check: CheckConfig{ExcludePaths: []string{"/docs/apps/lean.md"}}, wantErr: true},
+		{name: "parent escape exclusion", checkName: "coverage", check: CheckConfig{ExcludePaths: []string{"../apps/lean.md"}}, wantErr: true},
+		{name: "normalized duplicate exclusion", checkName: "coverage", check: CheckConfig{ExcludePaths: []string{"docs/apps/lean.md", "docs/apps/../apps/lean.md"}}, wantErr: true},
+		{name: "statuses on coverage", checkName: "coverage", check: CheckConfig{Statuses: []string{"draft2"}}, wantErr: true},
+		{name: "enabled editorial without statuses", checkName: "editorial", check: CheckConfig{Enabled: &enabled}, wantErr: true},
+		{name: "empty editorial status", checkName: "editorial", check: CheckConfig{Statuses: []string{""}}, wantErr: true},
+		{name: "whitespace editorial status", checkName: "editorial", check: CheckConfig{Statuses: []string{" \t "}}, wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCheckConfig(tt.checkName, &tt.check)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateCheckConfig() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateIssueConfig(t *testing.T) {
+	tests := []struct {
+		name    string
+		issue   IssueConfig
+		wantErr bool
+	}{
+		{
+			name: "valid source repository",
+			issue: IssueConfig{SourceRepositories: map[string]SourceRepositoryConfig{
+				"saltbox": {Slug: "saltyorg/Saltbox", Ref: "master"},
+			}},
+		},
+		{
+			name: "invalid owner repository slug",
+			issue: IssueConfig{SourceRepositories: map[string]SourceRepositoryConfig{
+				"saltbox": {Slug: "saltyorg", Ref: "master"},
+			}},
+			wantErr: true,
+		},
+		{
+			name: "owner with internal whitespace",
+			issue: IssueConfig{SourceRepositories: map[string]SourceRepositoryConfig{
+				"saltbox": {Slug: "salty org/Saltbox", Ref: "master"},
+			}},
+			wantErr: true,
+		},
+		{
+			name: "repository with unsupported character",
+			issue: IssueConfig{SourceRepositories: map[string]SourceRepositoryConfig{
+				"saltbox": {Slug: "saltyorg/Saltbox!", Ref: "master"},
+			}},
+			wantErr: true,
+		},
+		{
+			name: "valid GitHub owner and repository characters",
+			issue: IssueConfig{SourceRepositories: map[string]SourceRepositoryConfig{
+				"saltbox": {Slug: "salty-org/Salt_box.1", Ref: "master"},
+			}},
+		},
+		{
+			name: "missing source repository ref",
+			issue: IssueConfig{SourceRepositories: map[string]SourceRepositoryConfig{
+				"saltbox": {Slug: "saltyorg/Saltbox"},
+			}},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateIssueConfig(tt.issue)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateIssueConfig() error = %v, wantErr %t", err, tt.wantErr)
+			}
+		})
 	}
 }
 

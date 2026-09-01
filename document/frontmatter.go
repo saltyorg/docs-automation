@@ -11,6 +11,7 @@ import (
 type Frontmatter struct {
 	Raw               string                   // Raw frontmatter YAML
 	SaltboxAutomation *SaltboxAutomationConfig `yaml:"saltbox_automation"`
+	Status            string                   `yaml:"status"`
 }
 
 // SaltboxAutomationConfig represents the saltbox_automation frontmatter section.
@@ -20,6 +21,14 @@ type SaltboxAutomationConfig struct {
 	Inventory          InventoryConfig     `yaml:"inventory"`
 	AppLinks           []AppLink           `yaml:"app_links"`
 	ProjectDescription *ProjectDescription `yaml:"project_description"`
+	Checks             PageChecks          `yaml:"checks"`
+}
+
+// PageChecks controls which docs-health checks apply to a page.
+type PageChecks struct {
+	Coverage    *bool `yaml:"coverage"`
+	Frontmatter *bool `yaml:"frontmatter"`
+	Editorial   *bool `yaml:"editorial"`
 }
 
 // SectionsConfig controls which automated sections to include.
@@ -108,6 +117,38 @@ func (c *SaltboxAutomationConfig) IsOverviewSectionEnabled() bool {
 		return true
 	}
 	return *c.Sections.Overview
+}
+
+// IsCoverageCheckEnabled reports whether coverage checking is enabled for this page.
+func (c *SaltboxAutomationConfig) IsCoverageCheckEnabled() bool {
+	return pageCheckEnabled(c, func(checks PageChecks) *bool {
+		return checks.Coverage
+	})
+}
+
+// IsFrontmatterCheckEnabled reports whether frontmatter checking is enabled for this page.
+func (c *SaltboxAutomationConfig) IsFrontmatterCheckEnabled() bool {
+	return pageCheckEnabled(c, func(checks PageChecks) *bool {
+		return checks.Frontmatter
+	})
+}
+
+// IsEditorialCheckEnabled reports whether editorial checking is enabled for this page.
+func (c *SaltboxAutomationConfig) IsEditorialCheckEnabled() bool {
+	return pageCheckEnabled(c, func(checks PageChecks) *bool {
+		return checks.Editorial
+	})
+}
+
+func pageCheckEnabled(c *SaltboxAutomationConfig, selectCheck func(PageChecks) *bool) bool {
+	if c == nil {
+		return true
+	}
+	if c.Disabled {
+		return false
+	}
+	value := selectCheck(c.Checks)
+	return value == nil || *value
 }
 
 // ShouldShowSection returns whether a given section should be shown.

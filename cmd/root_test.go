@@ -2,6 +2,8 @@ package cmd
 
 import (
 	"bytes"
+	"errors"
+	"io"
 	"slices"
 	"strings"
 	"testing"
@@ -10,6 +12,12 @@ import (
 	"github.com/saltyorg/docs-automation/config"
 	"github.com/spf13/pflag"
 )
+
+type closedWriter struct{}
+
+func (closedWriter) Write([]byte) (int, error) {
+	return 0, io.ErrClosedPipe
+}
 
 func TestNewRootCmdBuildsFreshCommandTrees(t *testing.T) {
 	first := NewRootCmd()
@@ -104,6 +112,22 @@ func TestRootCommandMetadata(t *testing.T) {
 	}
 }
 
+func TestUpdateCheckFlagDescribesConfiguredDocumentationHealth(t *testing.T) {
+	root := NewRootCmd()
+	update, _, err := root.Find([]string{"update"})
+	if err != nil {
+		t.Fatalf("finding update command: %v", err)
+	}
+	check := update.Flags().Lookup("check")
+	if check == nil {
+		t.Fatal("update --check flag is missing")
+	}
+	const want = "run configured documentation-health checks after updating"
+	if check.Usage != want {
+		t.Fatalf("update --check help = %q, want %q", check.Usage, want)
+	}
+}
+
 func TestVersionOutputUsesCommandWriter(t *testing.T) {
 	for _, args := range [][]string{{"version"}, {"--version"}} {
 		t.Run(strings.Join(args, " "), func(t *testing.T) {
@@ -158,5 +182,16 @@ func TestCommandsRejectUnexpectedArguments(t *testing.T) {
 				t.Fatal("ExecuteContext() error = nil, want argument validation error")
 			}
 		})
+	}
+}
+
+func TestIndexCommandReturnsOutputError(t *testing.T) {
+	root := NewRootCmd()
+	root.SetOut(closedWriter{})
+	root.SetErr(new(bytes.Buffer))
+	root.SetArgs([]string{"index"})
+
+	if err := root.ExecuteContext(t.Context()); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("ExecuteContext() error = %v, want io.ErrClosedPipe", err)
 	}
 }

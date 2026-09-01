@@ -1,7 +1,7 @@
 package automation
 
 // Index reports the current index-generation implementation status.
-func (r *Runner) Index() {
+func (r *Runner) Index() error {
 	r.printf("Index generation is not yet implemented.\n\n")
 	r.printf("This command will eventually:\n")
 	for _, line := range []string{
@@ -11,4 +11,5 @@ func (r *Runner) Index() {
 	} {
 		r.printf("%s\n", line)
 	}
+	return r.result(nil)
 }

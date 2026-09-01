@@ -13,7 +13,8 @@ import (
 
 // UpdateCLIHelp updates the CLI help documentation.
 // Returns true if content was actually changed, false if unchanged.
-func (r *Runner) UpdateCLIHelp(ctx context.Context, cfg *config.Config, binaryPath string) (bool, error) {
+func (r *Runner) UpdateCLIHelp(ctx context.Context, cfg *config.Config, binaryPath string) (changed bool, err error) {
+	defer func() { err = r.result(err) }()
 	if err := ctx.Err(); err != nil {
 		return false, err
 	}

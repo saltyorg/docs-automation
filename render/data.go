@@ -45,6 +45,12 @@ type RoleData struct {
 	GlobalConfig *config.Config
 }
 
+// SourceCatalog contains authoritative shared inputs loaded before rendering.
+type SourceCatalog struct {
+	RoleVarLookups    map[string]string
+	DockerVarSuffixes []string
+}
+
 // SectionData represents a section for template rendering.
 type SectionData struct {
 	Name            string
@@ -104,7 +110,7 @@ type GlobalOverrideVar struct {
 }
 
 // BuildRoleData creates RoleData from parsed role information.
-func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document.SaltboxAutomationConfig) *RoleData {
+func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document.SaltboxAutomationConfig, sources SourceCatalog) *RoleData {
 	data := &RoleData{
 		RoleName:       role.Name,
 		RepoType:       role.RepoType,
@@ -216,22 +222,16 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document
 	// Build DockerInfo if the role has docker variables and a Docker section is shown.
 	if len(roleDockerVars) > 0 && cfg != nil && shouldShowDockerInfo(role, fmConfig) {
 		promoteDockerOverrideGroups(data, cfg, roleDockerVars, typeInfer, fmConfig)
-		data.DockerInfo = buildDockerInfo(cfg, role.Name, roleDockerVars)
+		data.DockerInfo = buildDockerInfo(cfg, role.Name, roleDockerVars, sources.DockerVarSuffixes)
 	}
 
-	// Scan inventory file for all role_var lookups and merge them in
+	// Merge the preloaded inventory role_var lookups.
 	if cfg != nil {
-		inventoryLookups, err := parser.ScanInventoryForRoleVarLookups(
-			cfg.InventoryPath(),
-			cfg.GlobalOverrides.IgnoreSuffixes,
-		)
-		if err == nil {
-			for suffix, varType := range inventoryLookups {
-				if _, exists := data.RoleVarLookups[suffix]; !exists {
-					data.RoleVarLookups[suffix] = &GlobalOverrideVar{
-						Suffix: suffix,
-						Type:   varType,
-					}
+		for suffix, varType := range sources.RoleVarLookups {
+			if _, exists := data.RoleVarLookups[suffix]; !exists {
+				data.RoleVarLookups[suffix] = &GlobalOverrideVar{
+					Suffix: suffix,
+					Type:   varType,
 				}
 			}
 		}
@@ -312,17 +312,25 @@ func getExampleValue(varType string) string {
 }
 
 // buildDockerInfo creates DockerInfo with additional docker variables not defined in the role.
-func buildDockerInfo(cfg *config.Config, roleName string, roleDockerVars []string) *DockerInfo {
-	// Get the resources path from config (saltbox repo)
-	resourcesPath := cfg.Repositories.Saltbox + "/resources"
+func buildDockerInfo(cfg *config.Config, roleName string, roleDockerVars, dockerVarSuffixes []string) *DockerInfo {
+	roleOverrideSuffixes := dockerRoleOverrideSuffixes(roleName, roleDockerVars)
+	ignoreSet := make(map[string]bool, len(cfg.DockerOverrides.IgnoreSuffixes))
+	for _, suffix := range cfg.DockerOverrides.IgnoreSuffixes {
+		normalized := config.NormalizeDockerSuffix(suffix)
+		if normalized != "" {
+			ignoreSet[normalized] = true
+		}
+	}
 
-	scanner := parser.NewDockerVarScanner(resourcesPath)
-	additionalVars, err := scanner.GetDockerVarSuffixes(
-		roleName,
-		roleDockerVars,
-		cfg.DockerOverrides.IgnoreSuffixes,
-	)
-	if err != nil || len(additionalVars) == 0 {
+	additionalVars := make([]string, 0, len(dockerVarSuffixes))
+	for _, suffix := range dockerVarSuffixes {
+		normalized := config.NormalizeDockerSuffix(suffix)
+		if normalized == "" || ignoreSet[normalized] || roleOverrideSuffixes[normalized] {
+			continue
+		}
+		additionalVars = append(additionalVars, normalized)
+	}
+	if len(additionalVars) == 0 {
 		return nil
 	}
 
@@ -578,6 +586,17 @@ func dockerRoleSuffixes(roleName string, roleDockerVars []string) map[string]boo
 	suffixes := make(map[string]bool, len(roleDockerVars))
 	for _, variable := range roleDockerVars {
 		if suffix, ok := dockerVariableSuffix(variable, roleName); ok {
+			suffixes[suffix] = true
+		}
+	}
+	return suffixes
+}
+
+func dockerRoleOverrideSuffixes(roleName string, roleDockerVars []string) map[string]bool {
+	prefix := roleName + "_role_docker_"
+	suffixes := make(map[string]bool, len(roleDockerVars))
+	for _, variable := range roleDockerVars {
+		if suffix, ok := strings.CutPrefix(variable, prefix); ok {
 			suffixes[suffix] = true
 		}
 	}

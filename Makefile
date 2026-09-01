@@ -1,4 +1,4 @@
-# Makefile for cloudplow project
+# Makefile for sb-docs
 # Build, test, and development automation
 
 # Variables
@@ -6,6 +6,7 @@ BINARY_NAME := sb-docs
 BUILD_DIR := build
 MODULE := github.com/saltyorg/docs-automation
 VERSION ?= 0.0.0-dev
+GOLANGCI_LINT_VERSION := v2.13.2
 GIT_COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "dev")
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 
@@ -30,12 +31,12 @@ NC := \033[0m # No Color
 .DEFAULT_GOAL := build
 
 # Phony targets (don't produce files with these names)
-.PHONY: all build test clean fmt vet lint run help version deps tidy update update-patch check modernize templ
+.PHONY: all build test test-coverage test-race bench fmt fmt-check vet lint check modernize deps tidy tidy-check update update-patch clean clean-all help info
 
 ##@ General
 
 help: ## Display this help message
-	@echo "$(BLUE)cloudplow Makefile$(NC)"
+	@echo "$(BLUE)sb-docs Makefile$(NC)"
 	@echo ""
 	@echo "$(GREEN)Usage:$(NC)"
 	@echo "  make [target]"
@@ -82,15 +83,20 @@ fmt: ## Format Go code
 	@echo "$(GREEN)Formatting code...$(NC)"
 	go fmt ./...
 
+fmt-check: ## Check Go formatting without modifying files
+	@echo "$(GREEN)Checking formatting...$(NC)"
+	@files="$$(git ls-files -z '*.go' | xargs -0 gofmt -l)"; \
+		if [ -n "$$files" ]; then echo "$$files"; exit 1; fi
+
 vet: ## Run go vet
 	@echo "$(GREEN)Running go vet...$(NC)"
 	go vet ./...
 
-lint: ## Run golangci-lint (always uses latest version)
-	@echo "$(GREEN)Running golangci-lint (latest version)...$(NC)"
-	@go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run ./...
+lint: ## Run pinned golangci-lint
+	@echo "$(GREEN)Running golangci-lint $(GOLANGCI_LINT_VERSION)...$(NC)"
+	@go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION) run ./...
 
-check: fmt vet lint ## Run all code quality checks (fmt, vet, lint)
+check: fmt-check tidy-check vet lint test-race ## Run all non-mutating quality checks
 
 modernize: ## Run Go modernization tool to update code to latest patterns
 	@echo "$(GREEN)Running Go modernization tool...$(NC)"
@@ -106,6 +112,11 @@ deps: ## Download dependencies
 tidy: ## Tidy and verify dependencies
 	@echo "$(GREEN)Tidying dependencies...$(NC)"
 	go mod tidy
+	go mod verify
+
+tidy-check: ## Check module metadata without modifying files
+	@echo "$(GREEN)Checking module metadata...$(NC)"
+	go mod tidy -diff
 	go mod verify
 
 update: ## Update direct dependencies to latest minor/patch versions (excludes indirect)

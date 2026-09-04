@@ -158,3 +158,110 @@ func TestScaffoldProvidesDockerMetadataAndSemanticLinksToCustomTemplates(t *test
 		})
 	}
 }
+
+func TestScaffoldUsesRegisteredSandboxInstallTag(t *testing.T) {
+	tests := []struct {
+		name     string
+		role     string
+		playbook string
+		wantTag  string
+		wantErr  string
+	}{
+		{
+			name:     "role and install tag differ",
+			role:     "fireflyiii_importer",
+			playbook: "---\n- hosts: localhost\n  roles:\n    - { role: fireflyiii_importer, tags: ['fireflyiii-importer'] }\n",
+			wantTag:  "fireflyiii-importer",
+		},
+		{
+			name:     "never tag precedes migration tag",
+			role:     "koito_migrate",
+			playbook: "---\n- hosts: localhost\n  roles:\n    - { role: koito_migrate, tags: ['never', 'koito-migrate'] }\n",
+			wantTag:  "koito-migrate",
+		},
+		{
+			name:     "first installable tag is canonical",
+			role:     "plex_meta_manager",
+			playbook: "---\n- hosts: localhost\n  roles:\n    - { role: plex_meta_manager, tags: ['plex-meta-manager', 'pmm-kometa-migration'] }\n",
+			wantTag:  "plex-meta-manager",
+		},
+		{
+			name:     "never-only companion is not installable",
+			role:     "worker",
+			playbook: "---\n- hosts: localhost\n  roles:\n    - { role: worker, tags: ['never'] }\n",
+			wantErr:  "does not declare an installable tag",
+		},
+		{
+			name:     "invalid registered tag",
+			role:     "bad_role",
+			playbook: "---\n- hosts: localhost\n  roles:\n    - { role: bad_role, tags: ['bad_tag'] }\n",
+			wantErr:  "must use lowercase kebab-case",
+		},
+		{
+			name:     "role is not registered",
+			role:     "missing_role",
+			playbook: "---\n- hosts: localhost\n  roles:\n    - { role: another_role, tags: ['another-role'] }\n",
+			wantErr:  "is not registered",
+		},
+		{
+			name:     "role is registered twice",
+			role:     "duplicate_role",
+			playbook: "---\n- hosts: localhost\n  roles:\n    - { role: duplicate_role, tags: ['duplicate-role'] }\n    - { role: duplicate_role, tags: ['duplicate-role'] }\n",
+			wantErr:  "is registered more than once",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			saltbox := filepath.Join(root, "saltbox")
+			sandbox := filepath.Join(root, "sandbox")
+			docs := filepath.Join(root, "docs")
+			for _, directory := range []string{
+				filepath.Join(saltbox, "roles"),
+				filepath.Join(sandbox, "roles", tt.role),
+				docs,
+			} {
+				if err := os.MkdirAll(directory, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := os.WriteFile(filepath.Join(sandbox, "sandbox.yml"), []byte(tt.playbook), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			templatePath := filepath.Join(root, "tag.tmpl")
+			if err := os.WriteFile(templatePath, []byte("{{.RoleTag}}\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			outputPath := filepath.Join(docs, "role.md")
+			cfg := &config.Config{Repositories: config.RepositoryConfig{
+				Saltbox: saltbox,
+				Sandbox: sandbox,
+				Docs:    docs,
+			}}
+
+			err := NewRunner(new(bytes.Buffer), new(bytes.Buffer), false).Scaffold(
+				t.Context(),
+				cfg,
+				tt.role,
+				ScaffoldOptions{TemplatePath: templatePath, OutputPath: outputPath},
+			)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("Scaffold() error = %v, want containing %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Scaffold() error = %v", err)
+			}
+			content, err := os.ReadFile(outputPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, want := string(content), tt.wantTag+"\n"; got != want {
+				t.Fatalf("scaffold tag = %q, want %q", got, want)
+			}
+		})
+	}
+}

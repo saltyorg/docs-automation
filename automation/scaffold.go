@@ -8,11 +8,13 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"text/template"
 
 	"github.com/saltyorg/docs-automation/config"
 	"github.com/saltyorg/docs-automation/document"
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -34,6 +36,17 @@ type ScaffoldData struct {
 	IsDocker  bool
 	Icon      string
 	AppLinks  []document.AppLink
+}
+
+var sandboxInstallTagPattern = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+type sandboxPlay struct {
+	Roles []sandboxRoleRegistration `yaml:"roles"`
+}
+
+type sandboxRoleRegistration struct {
+	Role string   `yaml:"role"`
+	Tags []string `yaml:"tags"`
 }
 
 // Scaffold creates a new documentation file for a role.
@@ -81,6 +94,11 @@ func (r *Runner) Scaffold(ctx context.Context, cfg *config.Config, roleName stri
 	}
 	if repoType == "sandbox" {
 		data.TagPrefix = "sandbox-"
+		roleTag, err := sandboxInstallTag(filepath.Join(cfg.Repositories.Sandbox, "sandbox.yml"), roleName)
+		if err != nil {
+			return fmt.Errorf("resolving Sandbox install tag: %w", err)
+		}
+		data.RoleTag = roleTag
 	}
 	defaultsPath := filepath.Join(rolesPath, roleName, "defaults", "main.yml")
 	if _, err := os.Stat(defaultsPath); err == nil {
@@ -130,6 +148,46 @@ func (r *Runner) Scaffold(ctx context.Context, cfg *config.Config, roleName stri
 
 	r.printf("Created %s\n", outputPath)
 	return nil
+}
+
+func sandboxInstallTag(playbookPath, roleName string) (string, error) {
+	content, err := os.ReadFile(playbookPath)
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", playbookPath, err)
+	}
+
+	var plays []sandboxPlay
+	if err := yaml.Unmarshal(content, &plays); err != nil {
+		return "", fmt.Errorf("parsing %s: %w", playbookPath, err)
+	}
+
+	registrations := make([]sandboxRoleRegistration, 0, 1)
+	for _, play := range plays {
+		for _, registration := range play.Roles {
+			if registration.Role == roleName {
+				registrations = append(registrations, registration)
+			}
+		}
+	}
+
+	if len(registrations) == 0 {
+		return "", fmt.Errorf("sandbox role %q is not registered in sandbox.yml", roleName)
+	}
+	if len(registrations) > 1 {
+		return "", fmt.Errorf("sandbox role %q is registered more than once in sandbox.yml", roleName)
+	}
+
+	for _, tag := range registrations[0].Tags {
+		if tag == "always" || tag == "never" {
+			continue
+		}
+		if !sandboxInstallTagPattern.MatchString(tag) {
+			return "", fmt.Errorf("sandbox role %q tag %q must use lowercase kebab-case", roleName, tag)
+		}
+		return tag, nil
+	}
+
+	return "", fmt.Errorf("sandbox role %q does not declare an installable tag", roleName)
 }
 
 func scaffoldAppLinks(isDocker bool, repository string, metadata config.DockerMetadataConfig) []document.AppLink {

@@ -258,7 +258,6 @@ func (s frontmatterSource) planLinkFills(root *yaml.Node, changes []AppLinkChang
 
 type linkField struct {
 	name    string
-	rank    int
 	desired *string
 	key     *yaml.Node
 	value   *yaml.Node
@@ -271,10 +270,10 @@ func (s frontmatterSource) planOneLinkFill(link *yaml.Node, change AppLinkChange
 		purpose = &value
 	}
 	fields := []linkField{
-		{name: "name", rank: 0, desired: change.Name},
-		{name: "url", rank: 1, desired: change.URL},
-		{name: "type", rank: 2},
-		{name: "purpose", rank: 3, desired: purpose},
+		{name: "name", desired: change.Name},
+		{name: "url", desired: change.URL},
+		{name: "type"},
+		{name: "purpose", desired: purpose},
 	}
 
 	for i := range fields {
@@ -347,7 +346,7 @@ func (s frontmatterSource) planExistingScalarFill(keyNode, valueNode *yaml.Node,
 	if valueNode.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 {
 		return frontmatterEdit{}, false, fmt.Errorf("%s block scalar targets are not supported", label)
 	}
-	start, end, commentFollows, err := s.scalarTokenRange(keyNode)
+	start, end, implicit, commentFollows, err := s.scalarTokenRange(keyNode, valueNode)
 	if err != nil {
 		return frontmatterEdit{}, false, fmt.Errorf("locating %s scalar: %w", label, err)
 	}
@@ -355,11 +354,14 @@ func (s frontmatterSource) planExistingScalarFill(keyNode, valueNode *yaml.Node,
 	if err != nil {
 		return frontmatterEdit{}, false, fmt.Errorf("encoding %s scalar: %w", label, err)
 	}
-	if start == end {
+	if implicit {
 		encoded = " " + encoded
 		if commentFollows {
 			encoded += " "
 		}
+	}
+	if bytes.Equal(s.content[start:end], []byte(encoded)) {
+		return frontmatterEdit{}, false, nil
 	}
 	return frontmatterEdit{start: start, end: end, replacement: []byte(encoded)}, true, nil
 }
@@ -391,19 +393,41 @@ func encodeInsertedScalar(value string) (string, error) {
 	return string(encoded), nil
 }
 
-func (s frontmatterSource) scalarTokenRange(keyNode *yaml.Node) (start, end int, commentFollows bool, err error) {
+func (s frontmatterSource) scalarTokenRange(keyNode, valueNode *yaml.Node) (start, end int, implicit, commentFollows bool, err error) {
+	if valueNode.Line > keyNode.Line {
+		lineStart, lineEnd, lineErr := s.lineRange(valueNode.Line)
+		if lineErr != nil {
+			return 0, 0, false, false, lineErr
+		}
+		tokenStart := lineStart + valueNode.Column - 1
+		if tokenStart < lineStart || tokenStart >= lineEnd {
+			return 0, 0, false, false, fmt.Errorf("invalid value column %d", valueNode.Column)
+		}
+		line := s.content[lineStart:lineEnd]
+		comment := yamlCommentStart(line, valueNode.Column-1)
+		tokenEnd := lineEnd
+		if comment >= 0 {
+			tokenEnd = lineStart + comment
+			commentFollows = true
+		}
+		for tokenEnd > tokenStart && (s.content[tokenEnd-1] == ' ' || s.content[tokenEnd-1] == '\t') {
+			tokenEnd--
+		}
+		return tokenStart, tokenEnd, false, commentFollows, nil
+	}
+
 	lineStart, lineEnd, err := s.lineRange(keyNode.Line)
 	if err != nil {
-		return 0, 0, false, err
+		return 0, 0, false, false, err
 	}
 	line := s.content[lineStart:lineEnd]
 	keyOffset := keyNode.Column - 1
 	if keyOffset < 0 || keyOffset >= len(line) {
-		return 0, 0, false, fmt.Errorf("invalid key column %d", keyNode.Column)
+		return 0, 0, false, false, fmt.Errorf("invalid key column %d", keyNode.Column)
 	}
 	colon := bytes.IndexByte(line[keyOffset:], ':')
 	if colon == -1 {
-		return 0, 0, false, fmt.Errorf("key has no value delimiter")
+		return 0, 0, false, false, fmt.Errorf("key has no value delimiter")
 	}
 	colon += keyOffset
 	areaStart := colon + 1
@@ -422,9 +446,9 @@ func (s frontmatterSource) scalarTokenRange(keyNode *yaml.Node) (start, end int,
 		tokenEnd--
 	}
 	if tokenStart == tokenEnd {
-		return lineStart + areaStart, lineStart + areaEnd, commentFollows, nil
+		return lineStart + areaStart, lineStart + areaEnd, true, commentFollows, nil
 	}
-	return lineStart + tokenStart, lineStart + tokenEnd, commentFollows, nil
+	return lineStart + tokenStart, lineStart + tokenEnd, false, commentFollows, nil
 }
 
 func yamlCommentStart(line []byte, start int) int {

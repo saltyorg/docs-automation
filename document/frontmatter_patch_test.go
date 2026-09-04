@@ -55,6 +55,47 @@ func TestPatchFrontmatterPreservesCRLFAndScalarStyle(t *testing.T) {
 	}
 }
 
+func TestPatchFrontmatterFillsImplicitNullBeforeInlineComment(t *testing.T) {
+	input := []byte("---\nsaltbox_automation:\n  app_links:\n    - name: Releases\n      url:   # preserve this note\n      purpose: release\n---\n")
+	url := "https://example.invalid/tags"
+	want := []byte("---\nsaltbox_automation:\n  app_links:\n    - name: Releases\n      url: https://example.invalid/tags # preserve this note\n      purpose: release\n---\n")
+
+	got, changed, err := PatchFrontmatter(input, FrontmatterChanges{Links: []AppLinkChange{{Index: 0, URL: &url}}})
+	if err != nil {
+		t.Fatalf("PatchFrontmatter() error = %v", err)
+	}
+	if !changed || !bytes.Equal(got, want) {
+		t.Fatalf("PatchFrontmatter() = changed %t, content:\n%s\nwant:\n%s", changed, got, want)
+	}
+}
+
+func TestPatchFrontmatterFillsScalarOnFollowingLine(t *testing.T) {
+	input := []byte("---\nsaltbox_automation:\n  app_links:\n    - name: Releases\n      url:\n        null # preserve this note\n      purpose: release\n---\n")
+	url := "https://example.invalid/tags"
+	want := []byte("---\nsaltbox_automation:\n  app_links:\n    - name: Releases\n      url:\n        https://example.invalid/tags # preserve this note\n      purpose: release\n---\n")
+
+	got, changed, err := PatchFrontmatter(input, FrontmatterChanges{Links: []AppLinkChange{{Index: 0, URL: &url}}})
+	if err != nil {
+		t.Fatalf("PatchFrontmatter() error = %v", err)
+	}
+	if !changed || !bytes.Equal(got, want) {
+		t.Fatalf("PatchFrontmatter() = changed %t, content:\n%s\nwant:\n%s", changed, got, want)
+	}
+}
+
+func TestPatchFrontmatterBlankDesiredMatchingBlankTargetIsUnchanged(t *testing.T) {
+	input := []byte("---\nicon: \"\"\n---\n")
+	icon := ""
+
+	got, changed, err := PatchFrontmatter(input, FrontmatterChanges{Icon: &icon})
+	if err != nil {
+		t.Fatalf("PatchFrontmatter() error = %v", err)
+	}
+	if changed || !bytes.Equal(got, input) {
+		t.Fatalf("PatchFrontmatter() = changed %t, content %q, want unchanged", changed, got)
+	}
+}
+
 func TestPatchFrontmatterInsertsLinkFieldsInCanonicalOrder(t *testing.T) {
 	input := []byte("---\nsaltbox_automation:\n  app_links:\n    - custom: keep\n      type: home\n---\n")
 	name := "Manual"

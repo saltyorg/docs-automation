@@ -30,7 +30,20 @@ func ValidateAutomationFrontmatter(fm *Frontmatter) []Diagnostic {
 				Message: fmt.Sprintf("app_links[%d].name is required", i),
 			})
 		}
-		if strings.TrimSpace(link.URL) == "" {
+
+		purpose := AppLinkPurpose(strings.TrimSpace(string(link.Purpose)))
+		switch {
+		case purpose == "":
+			diagnostics = append(diagnostics, Diagnostic{
+				Code:    "app_link_purpose_required",
+				Message: fmt.Sprintf("app_links[%d].purpose is required", i),
+			})
+		case !purpose.valid():
+			diagnostics = append(diagnostics, Diagnostic{
+				Code:    "app_link_purpose_invalid",
+				Message: fmt.Sprintf("app_links[%d].purpose %q is invalid", i, link.Purpose),
+			})
+		case purpose.RequiresURL() && strings.TrimSpace(link.URL) == "":
 			diagnostics = append(diagnostics, Diagnostic{
 				Code:    "app_link_url_required",
 				Message: fmt.Sprintf("app_links[%d].url is required", i),

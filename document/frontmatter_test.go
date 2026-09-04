@@ -10,6 +10,7 @@ func TestParseFrontmatter(t *testing.T) {
 		name      string
 		content   string
 		wantBody  string
+		wantRaw   string
 		wantFM    bool
 		wantError string
 	}{
@@ -22,6 +23,14 @@ func TestParseFrontmatter(t *testing.T) {
 			name:     "valid",
 			content:  "---\nsaltbox_automation:\n  disabled: false\n---\n# Sonarr\n",
 			wantBody: "# Sonarr\n",
+			wantRaw:  "saltbox_automation:\n  disabled: false\n",
+			wantFM:   true,
+		},
+		{
+			name:     "preserves untrimmed CRLF frontmatter",
+			content:  "---\r\n# leading comment\r\nstatus: 'outdated'  \r\n\r\n---\r\n# Sonarr\r\n",
+			wantBody: "# Sonarr\r\n",
+			wantRaw:  "# leading comment\r\nstatus: 'outdated'  \r\n\r\n",
 			wantFM:   true,
 		},
 		{
@@ -49,7 +58,45 @@ func TestParseFrontmatter(t *testing.T) {
 			if (fm != nil) != tt.wantFM {
 				t.Fatalf("frontmatter present = %t, want %t", fm != nil, tt.wantFM)
 			}
+			if fm != nil && fm.Raw != tt.wantRaw {
+				t.Fatalf("frontmatter raw = %q, want %q", fm.Raw, tt.wantRaw)
+			}
 		})
+	}
+}
+
+func TestAppLinkPurposeRequiresURL(t *testing.T) {
+	tests := []struct {
+		purpose AppLinkPurpose
+		want    bool
+	}{
+		{purpose: AppLinkPurposeManual},
+		{purpose: AppLinkPurposeRelease, want: true},
+		{purpose: AppLinkPurposeCommunity},
+		{purpose: AppLinkPurposeOther, want: true},
+		{purpose: AppLinkPurpose("invalid")},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.purpose), func(t *testing.T) {
+			if got := tt.purpose.RequiresURL(); got != tt.want {
+				t.Fatalf("RequiresURL() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseFrontmatterParsesAppLinkPurposeAndIcon(t *testing.T) {
+	fm, _, err := ParseFrontmatter("---\nicon: material/docker\nsaltbox_automation:\n  app_links:\n    - name: Manual\n      purpose: manual\n---\n")
+	if err != nil {
+		t.Fatalf("ParseFrontmatter() error = %v", err)
+	}
+	if fm.Icon != "material/docker" {
+		t.Fatalf("icon = %q, want material/docker", fm.Icon)
+	}
+	links := fm.SaltboxAutomation.AppLinks
+	if len(links) != 1 || links[0].Purpose != AppLinkPurposeManual {
+		t.Fatalf("app links = %#v, want one manual link", links)
 	}
 }
 

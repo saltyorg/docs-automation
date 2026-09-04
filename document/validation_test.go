@@ -62,7 +62,7 @@ func TestValidateAutomationFrontmatter(t *testing.T) {
 		{
 			name: "reports every incomplete supplied link and description field",
 			frontmatter: &Frontmatter{SaltboxAutomation: &SaltboxAutomationConfig{
-				AppLinks: []AppLink{{Name: " \t", URL: "\n"}},
+				AppLinks: []AppLink{{Name: " \t", URL: "\n", Purpose: AppLinkPurposeRelease}},
 				ProjectDescription: &ProjectDescription{
 					Name:    " ",
 					Summary: "\t",
@@ -78,13 +78,62 @@ func TestValidateAutomationFrontmatter(t *testing.T) {
 		{
 			name: "complete page is valid",
 			frontmatter: &Frontmatter{SaltboxAutomation: &SaltboxAutomationConfig{
-				AppLinks: []AppLink{{Name: "Website", URL: "https://example.invalid"}},
+				AppLinks: []AppLink{{Name: "Website", URL: "https://example.invalid", Purpose: AppLinkPurposeManual}},
 				ProjectDescription: &ProjectDescription{
 					Name:       "Full",
 					Summary:    "A complete page.",
 					Link:       "https://example.invalid",
 					Categories: []string{"Utilities"},
 				},
+			}},
+		},
+		{
+			name: "manual and community links permit blank URLs",
+			frontmatter: &Frontmatter{SaltboxAutomation: &SaltboxAutomationConfig{
+				AppLinks: []AppLink{
+					{Name: "Manual", URL: " \t", Purpose: AppLinkPurposeManual},
+					{Name: "Community", Purpose: AppLinkPurposeCommunity},
+				},
+				ProjectDescription: &ProjectDescription{Name: "Links", Summary: "Optional URLs."},
+			}},
+		},
+		{
+			name: "release and other links require URLs",
+			frontmatter: &Frontmatter{SaltboxAutomation: &SaltboxAutomationConfig{
+				AppLinks: []AppLink{
+					{Name: "Releases", Purpose: AppLinkPurposeRelease},
+					{Name: "Alternative", URL: "\n", Purpose: AppLinkPurposeOther},
+				},
+				ProjectDescription: &ProjectDescription{Name: "Links", Summary: "Required URLs."},
+			}},
+			wantCodes: []string{
+				"app_link_url_required",
+				"app_link_url_required",
+			},
+		},
+		{
+			name: "missing and invalid purposes have distinct diagnostics",
+			frontmatter: &Frontmatter{SaltboxAutomation: &SaltboxAutomationConfig{
+				AppLinks: []AppLink{
+					{Name: "Missing"},
+					{Name: "Invalid", Purpose: AppLinkPurpose("documentation")},
+				},
+				ProjectDescription: &ProjectDescription{Name: "Links", Summary: "Purpose validation."},
+			}},
+			wantCodes: []string{
+				"app_link_purpose_required",
+				"app_link_purpose_invalid",
+			},
+		},
+		{
+			name: "type remains presentation only",
+			frontmatter: &Frontmatter{SaltboxAutomation: &SaltboxAutomationConfig{
+				AppLinks: []AppLink{{
+					Name:    "Manual",
+					Type:    "not-a-policy-value",
+					Purpose: AppLinkPurposeManual,
+				}},
+				ProjectDescription: &ProjectDescription{Name: "Links", Summary: "Type is presentational."},
 			}},
 		},
 	}

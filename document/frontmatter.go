@@ -1,6 +1,7 @@
 package document
 
 import (
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -10,6 +11,7 @@ import (
 // Frontmatter represents the parsed frontmatter from a documentation file.
 type Frontmatter struct {
 	Raw               string                   // Raw frontmatter YAML
+	Icon              string                   `yaml:"icon"`
 	SaltboxAutomation *SaltboxAutomationConfig `yaml:"saltbox_automation"`
 	Status            string                   `yaml:"status"`
 }
@@ -44,11 +46,36 @@ type InventoryConfig struct {
 	ExampleOverrides map[string]string `yaml:"example_overrides"`
 }
 
+// AppLinkPurpose describes the semantic destination of an app link.
+type AppLinkPurpose string
+
+const (
+	AppLinkPurposeManual    AppLinkPurpose = "manual"
+	AppLinkPurposeRelease   AppLinkPurpose = "release"
+	AppLinkPurposeCommunity AppLinkPurpose = "community"
+	AppLinkPurposeOther     AppLinkPurpose = "other"
+)
+
+// RequiresURL reports whether links with this purpose require a URL.
+func (p AppLinkPurpose) RequiresURL() bool {
+	return p == AppLinkPurposeRelease || p == AppLinkPurposeOther
+}
+
+func (p AppLinkPurpose) valid() bool {
+	switch p {
+	case AppLinkPurposeManual, AppLinkPurposeRelease, AppLinkPurposeCommunity, AppLinkPurposeOther:
+		return true
+	default:
+		return false
+	}
+}
+
 // AppLink represents a project link for the overview table.
 type AppLink struct {
-	Name string `yaml:"name"`
-	URL  string `yaml:"url"`
-	Type string `yaml:"type,omitempty"`
+	Name    string         `yaml:"name"`
+	URL     string         `yaml:"url"`
+	Type    string         `yaml:"type,omitempty"`
+	Purpose AppLinkPurpose `yaml:"purpose"`
 }
 
 // ProjectDescription contains project metadata.
@@ -62,33 +89,81 @@ type ProjectDescription struct {
 // ParseFrontmatter extracts and parses the YAML frontmatter from markdown content.
 // Returns the frontmatter, the remaining content, and any error.
 func ParseFrontmatter(content string) (*Frontmatter, string, error) {
-	// Check for frontmatter delimiter
-	if !strings.HasPrefix(content, "---") {
+	data := []byte(content)
+	span, found, err := locateFrontmatter(data)
+	if err != nil {
+		return nil, content, err
+	}
+	if !found {
 		return nil, content, nil
 	}
 
-	// Find the closing delimiter
-	rest := content[3:]
-	endIdx := strings.Index(rest, "\n---")
-	if endIdx == -1 {
-		return nil, content, fmt.Errorf("unclosed frontmatter: missing closing ---")
-	}
-
-	rawFrontmatter := strings.TrimSpace(rest[:endIdx])
-	remainingContent := rest[endIdx+4:] // Skip past \n---
-
-	// Skip leading newline in remaining content
-	remainingContent = strings.TrimPrefix(remainingContent, "\n")
+	rawFrontmatter := data[span.yamlStart:span.yamlEnd]
+	remainingContent := string(data[span.bodyStart:])
 
 	// Parse the YAML
 	var fm Frontmatter
-	fm.Raw = rawFrontmatter
+	fm.Raw = string(rawFrontmatter)
 
-	if err := yaml.Unmarshal([]byte(rawFrontmatter), &fm); err != nil {
+	if err := yaml.Unmarshal(rawFrontmatter, &fm); err != nil {
 		return nil, content, fmt.Errorf("parsing frontmatter YAML: %w", err)
 	}
 
 	return &fm, remainingContent, nil
+}
+
+type frontmatterSpan struct {
+	yamlStart int
+	yamlEnd   int
+	bodyStart int
+	lineBreak []byte
+}
+
+func locateFrontmatter(content []byte) (frontmatterSpan, bool, error) {
+	if !bytes.HasPrefix(content, []byte("---")) {
+		return frontmatterSpan{}, false, nil
+	}
+
+	openingEnd, next, lineBreak := frontmatterLine(content, 0)
+	if !bytes.Equal(content[:openingEnd], []byte("---")) {
+		return frontmatterSpan{}, true, fmt.Errorf("malformed frontmatter: opening delimiter must be a standalone ---")
+	}
+	if len(lineBreak) == 0 {
+		return frontmatterSpan{}, true, fmt.Errorf("unclosed frontmatter: missing closing ---")
+	}
+
+	for lineStart := next; lineStart <= len(content); {
+		lineEnd, following, closingBreak := frontmatterLine(content, lineStart)
+		if bytes.Equal(content[lineStart:lineEnd], []byte("---")) {
+			return frontmatterSpan{
+				yamlStart: next,
+				yamlEnd:   lineStart,
+				bodyStart: following,
+				lineBreak: lineBreak,
+			}, true, nil
+		}
+		if len(closingBreak) == 0 {
+			break
+		}
+		lineStart = following
+	}
+
+	return frontmatterSpan{}, true, fmt.Errorf("unclosed frontmatter: missing closing ---")
+}
+
+func frontmatterLine(content []byte, start int) (end, next int, lineBreak []byte) {
+	if start >= len(content) {
+		return len(content), len(content), nil
+	}
+	newline := bytes.IndexByte(content[start:], '\n')
+	if newline == -1 {
+		return len(content), len(content), nil
+	}
+	end = start + newline
+	if end > start && content[end-1] == '\r' {
+		return end - 1, end + 1, content[end-1 : end+1]
+	}
+	return end, end + 1, content[end : end+1]
 }
 
 // IsInventorySectionEnabled returns whether the inventory section should be generated.

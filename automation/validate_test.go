@@ -54,6 +54,7 @@ saltbox_automation:
   app_links:
     - name: ""
       url: ""
+      purpose: release
   project_description:
     name: ""
     summary: ""

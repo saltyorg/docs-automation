@@ -171,6 +171,21 @@ func TestUpdateDockerMetadataIgnoreSuppressesOnlyURL(t *testing.T) {
 	}
 }
 
+func TestUpdateDockerMetadataLeavesUnresolvedURLBlank(t *testing.T) {
+	fixture := newDockerUpdateFixture(t, dockerUpdateFrontmatter("", "", "", "author-type", "release"), false, false)
+	writeDockerUpdateFile(t, filepath.Join(fixture.cfg.SaltboxRolesPath(), "sonarr", "defaults", "main.yml"), []byte("####################\n# Docker\n####################\nsonarr_role_docker_image_repo: \"{{ sonarr_image }}\"\n"))
+	result := NewRunner(new(bytes.Buffer), new(bytes.Buffer), false).updateRoleWithResult(
+		t.Context(), fixture.cfg, render.SourceCatalog{}, "sonarr", "saltbox",
+	)
+	content := fixture.readDoc(t)
+	if result.Status != github.StatusUpdated || !strings.Contains(content, "icon: material/docker") || !strings.Contains(content, "name: Image tags") {
+		t.Fatalf("status = %s error = %q content:\n%s", result.Status, result.Error, content)
+	}
+	if strings.Contains(content, "url: http") {
+		t.Fatalf("unresolved URL was filled:\n%s", content)
+	}
+}
+
 func TestUpdateDockerMetadataDoesNotWritePartialChangesAfterRenderFailure(t *testing.T) {
 	fixture := newDockerUpdateFixture(t, dockerUpdateFrontmatter("", "", "", "author-type", "release"), true, true)
 	writeDockerUpdateFile(t, fixture.cfg.OverviewTemplatePath(), []byte("{{"))

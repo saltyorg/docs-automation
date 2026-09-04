@@ -16,8 +16,7 @@ func dockerMetadataChanges(doc *document.Document, role *parser.RoleInfo, metada
 	if doc == nil || !metadata.Enabled() {
 		return document.FrontmatterChanges{}
 	}
-	repository := dockerRepository(role)
-	if repository == "" {
+	if _, ok := dockerImageVariable(role); !ok {
 		return document.FrontmatterChanges{}
 	}
 
@@ -25,7 +24,7 @@ func dockerMetadataChanges(doc *document.Document, role *parser.RoleInfo, metada
 	if doc.Frontmatter == nil || doc.Frontmatter.SaltboxAutomation == nil {
 		return changes
 	}
-	target := resolveDockerRepository(repository, metadata)
+	target := resolveDockerRepository(dockerRepository(role), metadata)
 	for i, link := range doc.Frontmatter.SaltboxAutomation.AppLinks {
 		if link.Purpose != document.AppLinkPurposeRelease {
 			continue
@@ -40,27 +39,35 @@ func dockerMetadataChanges(doc *document.Document, role *parser.RoleInfo, metada
 }
 
 func dockerRepository(role *parser.RoleInfo) string {
-	if role == nil {
+	variable, ok := dockerImageVariable(role)
+	if !ok {
 		return ""
+	}
+	return literalDockerRepository(variable.RawValue)
+}
+
+func dockerImageVariable(role *parser.RoleInfo) (parser.Variable, bool) {
+	if role == nil {
+		return parser.Variable{}, false
 	}
 	section := role.Sections["Docker"]
 	if section == nil {
-		return ""
+		return parser.Variable{}, false
 	}
 	name := role.Name + "_role_docker_image_repo"
 	for _, variable := range section.Variables {
 		if variable.Name == name {
-			return literalDockerRepository(variable.RawValue)
+			return variable, true
 		}
 	}
 	for _, subsectionName := range section.SubsectionOrder {
 		for _, variable := range section.Subsections[subsectionName] {
 			if variable.Name == name {
-				return literalDockerRepository(variable.RawValue)
+				return variable, true
 			}
 		}
 	}
-	return ""
+	return parser.Variable{}, false
 }
 
 func literalDockerRepository(raw string) string {

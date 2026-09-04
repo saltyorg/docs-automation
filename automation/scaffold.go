@@ -31,6 +31,9 @@ type ScaffoldData struct {
 	RoleTag   string // e.g., "sonarr" (for install command)
 	RepoType  string // "saltbox" or "sandbox"
 	TagPrefix string // "" for saltbox, "sandbox-" for sandbox
+	IsDocker  bool
+	Icon      string
+	AppLinks  []document.AppLink
 }
 
 // Scaffold creates a new documentation file for a role.
@@ -79,6 +82,22 @@ func (r *Runner) Scaffold(ctx context.Context, cfg *config.Config, roleName stri
 	if repoType == "sandbox" {
 		data.TagPrefix = "sandbox-"
 	}
+	defaultsPath := filepath.Join(rolesPath, roleName, "defaults", "main.yml")
+	if _, err := os.Stat(defaultsPath); err == nil {
+		roleInfo, err := r.parseRole(roleName, repoType, defaultsPath)
+		if err != nil {
+			return fmt.Errorf("parsing role: %w", err)
+		}
+		_, data.IsDocker = dockerImageVariable(roleInfo)
+		if data.IsDocker && cfg.DockerMetadata.Enabled() {
+			data.Icon = cfg.DockerMetadata.Icon
+		}
+		data.AppLinks = scaffoldAppLinks(data.IsDocker, dockerRepository(roleInfo), cfg.DockerMetadata)
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking role defaults: %w", err)
+	} else {
+		data.AppLinks = scaffoldAppLinks(false, "", cfg.DockerMetadata)
+	}
 
 	// Load template
 	templatePath := opts.TemplatePath
@@ -111,4 +130,24 @@ func (r *Runner) Scaffold(ctx context.Context, cfg *config.Config, roleName stri
 
 	r.printf("Created %s\n", outputPath)
 	return nil
+}
+
+func scaffoldAppLinks(isDocker bool, repository string, metadata config.DockerMetadataConfig) []document.AppLink {
+	release := document.AppLink{
+		Name:    "Releases",
+		Type:    "releases",
+		Purpose: document.AppLinkPurposeRelease,
+	}
+	if isDocker && metadata.Enabled() {
+		release.Name = metadata.ReleaseLink.Name
+		if target := resolveDockerRepository(repository, metadata); target.URL != "" {
+			release.URL = target.URL
+			release.Type = target.Type
+		}
+	}
+	return []document.AppLink{
+		{Name: "Manual", Type: "documentation", Purpose: document.AppLinkPurposeManual},
+		release,
+		{Name: "Community", Type: "community", Purpose: document.AppLinkPurposeCommunity},
+	}
 }

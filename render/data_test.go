@@ -309,6 +309,44 @@ func TestBuildRoleDataUsesExplicitSourceCatalog(t *testing.T) {
 	}
 }
 
+func TestBuildRoleDataGatesPathLookupsByRepositoryCallerCapability(t *testing.T) {
+	cfg := &config.Config{}
+	sources := SourceCatalog{
+		RoleVarLookups: map[string]string{
+			"_paths_owner":       parser.String,
+			"_paths_recursive":   parser.Bool,
+			"_web_host_override": parser.String,
+		},
+		ManagedDirectoryRoles: map[string]map[string]struct{}{
+			"saltbox": {"shared": {}},
+		},
+	}
+	role := &parser.RoleInfo{Name: "shared", RepoType: "saltbox", HasWeb: true}
+
+	capable := BuildRoleData(role, cfg, nil, sources)
+	if !sources.HasManagedDirectories("saltbox", "shared") {
+		t.Fatal("HasManagedDirectories(saltbox, shared) = false, want true")
+	}
+	if capable.RoleVarLookups["_paths_owner"] == nil || capable.RoleVarLookups["_paths_recursive"] == nil {
+		t.Fatalf("capable RoleVarLookups = %v, want path overrides", capable.RoleVarLookups)
+	}
+	if capable.RoleVarLookups["_web_host_override"] == nil {
+		t.Fatalf("capable RoleVarLookups = %v, want unchanged web override", capable.RoleVarLookups)
+	}
+
+	role.RepoType = "sandbox"
+	incapable := BuildRoleData(role, cfg, nil, sources)
+	if sources.HasManagedDirectories("sandbox", "shared") {
+		t.Fatal("HasManagedDirectories(sandbox, shared) = true, want false")
+	}
+	if incapable.RoleVarLookups["_paths_owner"] != nil || incapable.RoleVarLookups["_paths_recursive"] != nil {
+		t.Fatalf("incapable RoleVarLookups = %v, want no path overrides", incapable.RoleVarLookups)
+	}
+	if incapable.RoleVarLookups["_web_host_override"] == nil {
+		t.Fatalf("incapable RoleVarLookups = %v, want unchanged web override", incapable.RoleVarLookups)
+	}
+}
+
 func TestBuildRoleDataRemovesPromotedGroupFromDockerPlus(t *testing.T) {
 	dockerVarSuffixes := []string{
 		"gpu_enabled",

@@ -99,6 +99,7 @@ func newUpdateHealthFixture(t *testing.T) updateHealthFixture {
 	for _, path := range []string{
 		filepath.Join(saltboxRoot, "roles", "broken", "defaults"),
 		filepath.Join(saltboxRoot, "inventories", "group_vars"),
+		filepath.Join(saltboxRoot, "resources", "tasks", "directories"),
 		filepath.Join(saltboxRoot, "resources", "tasks", "docker"),
 		filepath.Join(sandboxRoot, "roles"),
 		filepath.Join(docsRoot, "docs", "apps"),
@@ -110,6 +111,7 @@ func newUpdateHealthFixture(t *testing.T) updateHealthFixture {
 	}
 	writeUpdateHealthFixtureFile(t, filepath.Join(saltboxRoot, "roles", "broken", "defaults", "main.yml"), []byte("broken_enabled: true\n"), 0o644)
 	writeUpdateHealthFixtureFile(t, filepath.Join(saltboxRoot, "inventories", "group_vars", "all.yml"), []byte("{}\n"), 0o644)
+	writeUpdateHealthFixtureFile(t, filepath.Join(saltboxRoot, "resources", "tasks", "directories", "create_directories.yml"), []byte("---\n[]\n"), 0o644)
 	writeUpdateHealthFixtureFile(t, filepath.Join(docsRoot, "docs", "apps", "broken.md"), []byte("---\nsaltbox_automation: [\n---\n"), 0o644)
 
 	return updateHealthFixture{

@@ -47,8 +47,16 @@ type RoleData struct {
 
 // SourceCatalog contains authoritative shared inputs loaded before rendering.
 type SourceCatalog struct {
-	RoleVarLookups    map[string]string
-	DockerVarSuffixes []string
+	RoleVarLookups        map[string]string
+	DockerVarSuffixes     []string
+	ManagedDirectoryRoles map[string]map[string]struct{}
+}
+
+// HasManagedDirectories reports whether a role in a specific repository
+// directly invokes the authoritative managed-directory task.
+func (c SourceCatalog) HasManagedDirectories(repoType, roleName string) bool {
+	_, ok := c.ManagedDirectoryRoles[repoType][roleName]
+	return ok
 }
 
 // SectionData represents a section for template rendering.
@@ -261,7 +269,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document
 
 		// Filter RoleVarLookups based on role sections
 		// Remove overrides that don't apply to this role
-		data.RoleVarLookups = filterRoleVarLookups(data.RoleVarLookups, role)
+		data.RoleVarLookups = filterRoleVarLookups(data.RoleVarLookups, role, sources)
 	}
 
 	// Set ExampleVar and ExampleValue for non-instance roles
@@ -782,9 +790,13 @@ func filterCoveredRoleVarLookups(lookups map[string]*GlobalOverrideVar, document
 
 // filterRoleVarLookups removes global override options that don't apply to the role
 // based on which sections the role has.
-func filterRoleVarLookups(lookups map[string]*GlobalOverrideVar, role *parser.RoleInfo) map[string]*GlobalOverrideVar {
+func filterRoleVarLookups(lookups map[string]*GlobalOverrideVar, role *parser.RoleInfo, sources SourceCatalog) map[string]*GlobalOverrideVar {
 	filtered := make(map[string]*GlobalOverrideVar)
 	for suffix, overrideVar := range lookups {
+		if strings.HasPrefix(suffix, "_paths_") && !sources.HasManagedDirectories(role.RepoType, role.Name) {
+			continue
+		}
+
 		// Check if this override applies to the role based on its sections
 		suffixLower := strings.ToLower(suffix)
 

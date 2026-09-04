@@ -50,6 +50,23 @@ func (m *Manager) SaveDocument(doc *Document) error {
 	return WriteFileAtomic(doc.Path, []byte(doc.Content), 0o644, true)
 }
 
+// ApplyFrontmatterChanges updates a document in memory and synchronizes its parsed fields.
+func (m *Manager) ApplyFrontmatterChanges(doc *Document, changes FrontmatterChanges) (bool, error) {
+	updated, changed, err := PatchFrontmatter([]byte(doc.Content), changes)
+	if err != nil || !changed {
+		return false, err
+	}
+	fm, body, err := ParseFrontmatter(string(updated))
+	if err != nil {
+		return false, fmt.Errorf("parsing patched frontmatter: %w", err)
+	}
+
+	doc.Content = string(updated)
+	doc.Frontmatter = fm
+	doc.Body = body
+	return true, nil
+}
+
 // UpdateVariablesSection updates the managed variables section in a document.
 func (m *Manager) UpdateVariablesSection(doc *Document, newContent string) error {
 	updated, err := UpdateManagedSection(doc.Content, m.markers.Variables, newContent)

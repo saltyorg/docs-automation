@@ -139,6 +139,21 @@ Custom scaffold templates receive these fields:
 | `.RoleTag` | Install tag without the Sandbox prefix |
 | `.RepoType` | `saltbox` or `sandbox` |
 | `.TagPrefix` | Empty for Saltbox or `sandbox-` for Sandbox |
+| `.IsDocker` | Whether the role defines its exact primary image variable in the Docker section |
+| `.Icon` | Configured Docker icon for an eligible Docker role, otherwise empty |
+| `.AppLinks` | Three ordered semantic link objects containing `Name`, `URL`, `Type`, and `Purpose` |
+
+The canonical scaffold renders exactly three links in this order: Manual
+(`manual`/`documentation`), the release link (`release`), and Community
+(`community`/`community`). Manual and Community begin with explicit blank
+URLs. A non-Docker release uses `Releases`, a blank URL, and type `releases`.
+An eligible Docker role receives the configured top-level icon and release
+label; a literal repository resolved by `docker_metadata` also supplies the
+release URL and type. An unresolved, Jinja-derived, ignored, or unsupported
+repository leaves that required release URL blank for an author to complete.
+The top-level `icon` key is omitted when `.Icon` is empty. The canonical
+template retains both managed marker pairs and the existing role title,
+deployment tag, and project-description placeholders.
 
 #### `sb-docs validate`
 
@@ -147,11 +162,11 @@ paths and cross-field constraints.
 
 `validate frontmatter` recursively checks Markdown below `docs/apps` and
 `docs/sandbox/apps`, excluding `index.md`. It validates YAML parsing,
-non-empty `app_links[].name`, non-empty `app_links[].url`, and the documented
-`project_description` name and summary requirements when enabled. It honors
-frontmatter path and page opt-outs. Documentation reached only through a path
-override, such as `docs/reference/modules`, is not part of this frontmatter
-scan.
+non-empty `app_links[].name`, exact semantic purposes, purpose-dependent URL
+requirements, and the documented `project_description` name and summary
+requirements when enabled. It honors frontmatter path and page opt-outs.
+Documentation reached only through a path override, such as
+`docs/reference/modules`, is not part of this frontmatter scan.
 
 #### `sb-docs index`
 
@@ -196,6 +211,7 @@ directory semantics of a full config.
 | `path_overrides` | map | no | Per-repository role-to-doc path replacements |
 | `global_overrides` | object | no | Inventory `role_var` exclusions and rendered metadata |
 | `docker_overrides` | object | no | Docker+ exclusions, presentation groups, and metadata |
+| `docker_metadata` | object | no | Fill-only Docker icon and release-link derivation |
 | `section_explainers` | map | no | Shared Markdown introductions keyed by exact section name |
 | `type_inference` | object | no | Configured suffix, filter, and symbol type rules |
 | `docker_variables` | object | no | Authoritative Docker+ suffix-to-type buckets |
@@ -306,19 +322,24 @@ a coverage blacklist rather than a page-level opt-out.
 
 Frontmatter syntax and frontmatter semantics are distinct. Invalid YAML or an
 unclosed frontmatter block is a syntax finding. For an enabled overview,
-semantic validation requires `project_description.name` and
-`project_description.summary`, and each configured `app_links` entry requires
-both `name` and `url`. A syntactically valid page without
-`saltbox_automation` has no automation metadata to validate.
+stored-file validation requires a `project_description` object with non-empty
+`name` and `summary`. Every configured `app_links` entry requires a
+non-empty `name` and one exact `purpose` value. `release` and `other` links
+also require a non-empty URL; `manual` and `community` links may deliberately
+store a blank URL. A syntactically valid page without `saltbox_automation` has
+no automation metadata to validate.
 
 `sb-docs validate frontmatter` is an explicit corpus validator, not a
 docs-health report switch: it runs even when `checks.frontmatter.enabled` is
-false. It honors frontmatter path exclusions and the page opt-outs above,
-prints valid, invalid, no-frontmatter, and excluded totals, and exits nonzero
-when any non-excluded file is syntactically or semantically invalid. In
-contrast, `sb-docs validate config` loads the selected full config or
-path-only overlay, validates its schema and required repository directories,
-and prints `✅ Config is valid` on success.
+false. It validates the values currently stored in each file; it does not run
+an update or assume a later metadata repair. An exact config path exclusion is
+applied before parsing. After parsing, `disabled: true`,
+`checks.frontmatter: false`, or `sections.overview: false` excludes that page,
+in that precedence. It prints valid, invalid, no-frontmatter, and excluded
+totals and exits nonzero when any non-excluded file is syntactically or
+semantically invalid. In contrast, `sb-docs validate config` loads the
+selected full config or path-only overlay, validates its schema and required
+repository directories, and prints `✅ Config is valid` on success.
 
 #### `issue`
 
@@ -411,8 +432,23 @@ same metadata object, keyed by a lookup suffix:
 | `variables` | map | no | Metadata keyed by exact `role_var` suffix |
 
 Inventory lookups that are not ignored or already documented by the role are
-shown as global override options. Metadata can enrich those discovered
-options but does not create a lookup that the inventory never exposes.
+shown as global override options. Discovery unions `role_var` lookups from
+Saltbox `inventories/group_vars/all.yml` and the shared
+`resources/tasks/directories/create_directories.yml`; failure to read either
+authoritative source fails generation or update. Metadata can enrich those
+discovered options but does not create a lookup that neither source exposes.
+
+Options with a `_paths_` suffix have one additional gate. The source-role
+scanner parses YAML task lists below each repository's
+`roles/<role>/tasks` tree and records the repository-qualified role only when
+an `ansible.builtin.include_tasks` scalar is exactly
+`{{ resources_tasks_path }}/directories/create_directories.yml` after outer
+whitespace is trimmed. The same action inside `block`, `rescue`, or `always`
+task lists counts. Comments, defaults, task data, short action names, other
+include/import actions, and roles of the same name in the other repository do
+not grant the capability. Discovered `_paths_` options are rendered only for
+that exact caller; the canonical config remains authoritative for which
+suffixes are ignored or enriched.
 
 ### `docker_overrides`
 
@@ -438,6 +474,47 @@ repeat its primary as a companion or repeat another member. If the role
 defines the primary, the complete group is promoted into its Docker section;
 otherwise the group appears in Docker+. Missing members use configured
 metadata/defaults when present.
+
+### `docker_metadata`
+
+`docker_metadata` derives a Docker icon and a release destination from the
+role's primary image repository. The canonical config owns the evolving
+override, rule, and ignore entries; their schema is:
+
+| Field | Type | Required when enabled | Description |
+|-------|------|-----------------------|-------------|
+| `icon` | string | yes | Top-level MkDocs icon offered to Docker pages and scaffolds |
+| `release_link.name` | string | yes | Label offered to an existing semantic release link |
+| `overrides` | map | no | Normalized repository to an object containing required non-empty `url` and `type` |
+| `rules` | list | no | Ordered objects containing an anchored `pattern`, capture-aware `url`, and non-empty `type` |
+| `ignore` | list | no | Repositories for which automatic URL resolution is suppressed |
+
+The feature is enabled when any child is configured, at which point `icon`
+and `release_link.name` are required. Repository comparisons trim surrounding
+whitespace and are case-insensitive. Each rule pattern must begin with `^`,
+end with `$`, compile as a Go regular expression, and reference only valid
+captures in its URL replacement. Normalized override and ignore keys must be
+unique, and a repository cannot appear in both.
+
+Only the exact `<role>_role_docker_image_repo` variable in the exact `Docker`
+section (including its subsections) is primary. Resolution accepts a plain,
+single-quoted, or double-quoted scalar string only. Jinja delimiters,
+non-string YAML, aliases or anchored values, literal/folded block scalars,
+empty values, and multiple YAML documents remain unresolved. For a literal
+repository, precedence is: exact override, exact ignore, then the first
+full-string matching rule. No match is unresolved; there is no heuristic
+registry fallback outside the canonical rules.
+
+During update, metadata repair is surgical and fill-only. For an eligible
+Docker page with overview automation enabled, it can fill a missing or blank
+top-level `icon` and the `name` or `url` of an existing link whose stored
+`purpose` is `release`. A URL is offered only after successful repository
+resolution. Existing non-empty values always win. Repair never changes
+`type`, changes `purpose`, creates an app-link entry or list, or infers which
+link is a release. The scalar patch preserves unrelated frontmatter bytes,
+comments, quoting, and line endings, reparses before publication, and the
+document is saved atomically. The resolved `type` is used when scaffolding a
+new page, not to rewrite an authored stored link.
 
 ### `section_explainers`
 
@@ -556,9 +633,10 @@ scaffold:
 
 ## Document Frontmatter
 
-`sb-docs` reads only the `saltbox_automation` block. Other page frontmatter,
-such as MkDocs `icon`, `tags`, `hide`, `title`, or `status`, is preserved but
-does not configure this tool.
+Behavioral page controls live only in the `saltbox_automation` block. The tool
+also reads the top-level MkDocs `icon` to preserve or fill it during eligible
+Docker metadata repair. Other page frontmatter, such as `tags`, `hide`,
+`title`, or `status`, is preserved but does not configure this tool.
 
 ### Complete Shape
 
@@ -581,6 +659,7 @@ saltbox_automation:
     - name: Project home
       url: https://example.com
       type: home
+      purpose: manual
   project_description:
     name: Example
     summary: an example application.
@@ -639,8 +718,23 @@ sections, so those cannot be restored with `show_sections`.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `name` | string | yes | Button label |
-| `url` | string | yes | Non-empty target URL |
+| `url` | string | for `release` and `other` | Target URL; it may be blank for `manual` and `community` |
 | `type` | string | no | Icon key owned by the canonical overview template |
+| `purpose` | string | yes | Exact semantic destination: `manual`, `release`, `community`, or `other` |
+
+`purpose` controls validation and automation ownership; `type` controls only
+presentation. The fixed purpose policy is:
+
+| Purpose | URL policy | Meaning |
+|---------|------------|---------|
+| `manual` | optional | User documentation or project home |
+| `release` | required | Release, package, or image versions |
+| `community` | optional | Community or support destination |
+| `other` | required | Any other authored destination |
+
+Purpose values are exact and case-sensitive. Missing, blank,
+whitespace-padded, or unknown values are invalid. Automation does not infer
+purpose from a link's name, position, URL, or presentation type.
 
 The canonical `templates/overview.md.tmpl` recognizes:
 
@@ -805,10 +899,14 @@ joined in order. Global text resets at a new section or subsection end.
 
 ### Global Override Discovery
 
-`sb-docs` scans `inventories/group_vars/all.yml` for `role_var` lookup calls.
-Each lookup's `<suffix>` is inferred from its name and context, removed when
-listed in `global_overrides.ignore_suffixes`, and enriched from
-`global_overrides.variables`.
+`sb-docs` unions `role_var` lookup calls from
+`inventories/group_vars/all.yml` and
+`resources/tasks/directories/create_directories.yml`. Each lookup's
+`<suffix>` is inferred from its name and context, removed when listed in
+`global_overrides.ignore_suffixes`, and enriched from
+`global_overrides.variables`. As described in [`global_overrides`](#global_overrides),
+rendering a discovered `_paths_` suffix additionally requires an exact,
+repository-qualified managed-directory task caller.
 
 An override already represented by `<role>_role<suffix>` in a visible role
 section is not repeated. Web, Traefik/ThemePark, Docker/dependency, and DNS
@@ -826,6 +924,13 @@ Discovered suffixes already defined as `<role>_role_docker_<suffix>` are
 removed. Remaining options are filtered by `docker_overrides.ignore_suffixes`,
 typed by `docker_variables` and per-variable metadata, grouped when
 configured, and categorized for Docker+ rendering.
+
+The canonical inventory template walks authored `SectionOrder` without
+reordering it. When a visible Docker section has Docker+ content, Docker+ is
+emitted immediately after Docker inside that loop. Hiding Docker also prevents
+Docker+ from appearing. Later authored sections retain their relative order,
+and Global Override Options is emitted after the authored loop, so it remains
+last whenever present.
 
 ## Architecture
 

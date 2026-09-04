@@ -252,52 +252,71 @@ func (r *Runner) updateRoleWithResult(ctx context.Context, cfg *config.Config, s
 	}
 
 	inventorySkipReason := ""
-
-	// Update inventory section if enabled
-	if fmConfig.IsInventorySectionEnabled() && manager.HasVariablesSection(doc) {
+	var roleInfo *parser.RoleInfo
+	needsInventoryRole := fmConfig.IsInventorySectionEnabled() && manager.HasVariablesSection(doc)
+	needsMetadataRole := cfg.DockerMetadata.Enabled() && fmConfig.IsOverviewSectionEnabled()
+	if needsInventoryRole || needsMetadataRole {
 		if _, err := os.Stat(defaultsPath); os.IsNotExist(err) {
-			inventorySkipReason = "no defaults/main.yml"
+			if needsInventoryRole {
+				inventorySkipReason = "no defaults/main.yml"
+			}
 		} else {
-			// Parse the role
-			p := parser.New(roleName, repoType)
-			roleInfo, err := p.ParseFile(defaultsPath)
+			roleInfo, err = r.parseRole(roleName, repoType, defaultsPath)
 			if err != nil {
 				result.Status = github.StatusError
 				result.Error = fmt.Sprintf("parsing: %v", err)
 				return result
 			}
+		}
+	}
 
-			// Skip if no variables (use filtered count for this check)
-			filteredVars := parser.FilterVariables(roleInfo.AllVariables, roleName)
-			if len(filteredVars) == 0 {
-				inventorySkipReason = "no documentable variables"
-			} else {
-				// Build template data
-				data := render.BuildRoleData(roleInfo, cfg, fmConfig, sources)
-
-				// Create template engine and render
-				engine := render.New()
-				if err := engine.LoadFile("inventory", cfg.InventoryTemplatePath()); err != nil {
-					result.Status = github.StatusError
-					result.Error = fmt.Sprintf("loading template: %v", err)
-					return result
-				}
-
-				output, err := engine.Render("inventory", data)
-				if err != nil {
-					result.Status = github.StatusError
-					result.Error = fmt.Sprintf("rendering: %v", err)
-					return result
-				}
-
-				// Update the managed section
-				if err := manager.UpdateVariablesSection(doc, output); err != nil {
-					result.Status = github.StatusError
-					result.Error = fmt.Sprintf("updating section: %v", err)
-					return result
-				}
-				result.Sections = append(result.Sections, "variables")
+	if needsMetadataRole && roleInfo != nil {
+		changed, err := manager.ApplyFrontmatterChanges(doc, dockerMetadataChanges(doc, roleInfo, cfg.DockerMetadata))
+		if err != nil {
+			result.Status = github.StatusError
+			result.Error = fmt.Sprintf("repairing docker metadata: %v", err)
+			return result
+		}
+		if changed {
+			result.Sections = append(result.Sections, "frontmatter")
+			if doc.Frontmatter != nil {
+				fmConfig = doc.Frontmatter.SaltboxAutomation
 			}
+		}
+	}
+
+	// Update inventory section if enabled
+	if needsInventoryRole && roleInfo != nil {
+		// Skip if no variables (use filtered count for this check)
+		filteredVars := parser.FilterVariables(roleInfo.AllVariables, roleName)
+		if len(filteredVars) == 0 {
+			inventorySkipReason = "no documentable variables"
+		} else {
+			// Build template data
+			data := render.BuildRoleData(roleInfo, cfg, fmConfig, sources)
+
+			// Create template engine and render
+			engine := render.New()
+			if err := engine.LoadFile("inventory", cfg.InventoryTemplatePath()); err != nil {
+				result.Status = github.StatusError
+				result.Error = fmt.Sprintf("loading template: %v", err)
+				return result
+			}
+
+			output, err := engine.Render("inventory", data)
+			if err != nil {
+				result.Status = github.StatusError
+				result.Error = fmt.Sprintf("rendering: %v", err)
+				return result
+			}
+
+			// Update the managed section
+			if err := manager.UpdateVariablesSection(doc, output); err != nil {
+				result.Status = github.StatusError
+				result.Error = fmt.Sprintf("updating section: %v", err)
+				return result
+			}
+			result.Sections = append(result.Sections, "variables")
 		}
 	}
 
@@ -343,7 +362,7 @@ func (r *Runner) updateRoleWithResult(ctx context.Context, cfg *config.Config, s
 	}
 
 	// Save the document
-	if err := manager.SaveDocument(doc); err != nil {
+	if err := r.saveDocument(manager, doc); err != nil {
 		result.Status = github.StatusError
 		result.Error = fmt.Sprintf("saving document: %v", err)
 		return result

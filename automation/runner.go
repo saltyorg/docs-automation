@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/saltyorg/docs-automation/document"
+	"github.com/saltyorg/docs-automation/parser"
 )
 
 type trackingWriter struct {
@@ -29,6 +32,8 @@ type Runner struct {
 	errOut          *trackingWriter
 	verbose         bool
 	resolveRevision revisionResolver
+	parseRole       func(roleName, repoType, path string) (*parser.RoleInfo, error)
+	saveDocument    func(manager *document.Manager, doc *document.Document) error
 }
 
 // NewRunner creates a documentation workflow runner.
@@ -38,6 +43,12 @@ func NewRunner(out, errOut io.Writer, verbose bool) *Runner {
 		errOut:          &trackingWriter{writer: errOut},
 		verbose:         verbose,
 		resolveRevision: gitRevision,
+		parseRole: func(roleName, repoType, path string) (*parser.RoleInfo, error) {
+			return parser.New(roleName, repoType).ParseFile(path)
+		},
+		saveDocument: func(manager *document.Manager, doc *document.Document) error {
+			return manager.SaveDocument(doc)
+		},
 	}
 }
 

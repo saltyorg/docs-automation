@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -750,6 +751,38 @@ func TestValidateDockerMetadataRejectsInvalidValues(t *testing.T) {
 			err := validateDockerMetadata(cfg)
 			if err == nil || !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tt.want)) {
 				t.Fatalf("validateDockerMetadata() error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestValidateReplacementCapturesMatchesRegexpExpansionGrammar(t *testing.T) {
+	pattern := regexp.MustCompile(`^(?P<name>[^/]+)/([^/]+)$`)
+	for _, replacement := range []string{
+		"https://example.invalid/$0",
+		"https://example.invalid/$1",
+		"https://example.invalid/${name}",
+		"https://example.invalid/$$literal",
+		"https://example.invalid/$0/${name}/$2/$$literal",
+	} {
+		t.Run("valid_"+replacement, func(t *testing.T) {
+			if err := validateReplacementCaptures(replacement, pattern); err != nil {
+				t.Fatalf("validateReplacementCaptures(%q) error = %v", replacement, err)
+			}
+		})
+	}
+
+	for _, replacement := range []string{
+		"https://example.invalid/$00",
+		"https://example.invalid/$01",
+		"https://example.invalid/${name",
+		"https://example.invalid/${}",
+		"https://example.invalid/${missing}",
+		"https://example.invalid/$3",
+	} {
+		t.Run("invalid_"+replacement, func(t *testing.T) {
+			if err := validateReplacementCaptures(replacement, pattern); err == nil {
+				t.Fatalf("validateReplacementCaptures(%q) error = nil, want invalid capture", replacement)
 			}
 		})
 	}

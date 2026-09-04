@@ -56,6 +56,27 @@ func TestResolveDockerMetadataUsesOverrideIgnoreAndOrderedRules(t *testing.T) {
 	}
 }
 
+func TestResolveDockerMetadataExpandsValidatedTemplateExactly(t *testing.T) {
+	cfg := config.DockerMetadataConfig{
+		Icon:        "material/docker",
+		ReleaseLink: config.DockerMetadataReleaseLink{Name: "Image tags"},
+		Rules: []config.DockerMetadataRule{{
+			Pattern: `^(?P<owner>[^/]+)/([^/]+)$`,
+			URL:     "https://example.invalid/$0/${owner}/$2/$$literal",
+			Type:    "example",
+		}},
+	}
+
+	got := resolveDockerRepository("Acme/Widget", cfg)
+	want := config.DockerMetadataTarget{
+		URL:  "https://example.invalid/acme/widget/acme/widget/$literal",
+		Type: "example",
+	}
+	if got != want {
+		t.Fatalf("resolveDockerRepository() = %#v, want %#v", got, want)
+	}
+}
+
 func TestDockerRepositoryRequiresExactPrimaryVariableInExactDockerSection(t *testing.T) {
 	tests := []struct {
 		name string

@@ -7,8 +7,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -424,44 +425,75 @@ func validateDockerMetadata(metadata DockerMetadataConfig) error {
 }
 
 func validateReplacementCaptures(replacement string, pattern *regexp.Regexp) error {
-	for i := 0; i < len(replacement); i++ {
-		if replacement[i] != '$' || i+1 >= len(replacement) {
+	for len(replacement) > 0 {
+		_, after, found := strings.Cut(replacement, "$")
+		if !found {
+			break
+		}
+		replacement = after
+		if replacement != "" && replacement[0] == '$' {
+			replacement = replacement[1:]
 			continue
 		}
-		start := i + 1
-		end := start
-		if replacement[start] == '{' {
-			start++
-			end = strings.IndexByte(replacement[start:], '}')
-			if end < 0 {
-				return fmt.Errorf("has an unterminated reference")
+		name, number, rest, ok := extractReplacementToken(replacement)
+		if !ok {
+			if strings.HasPrefix(replacement, "{") {
+				return fmt.Errorf("has a malformed braced reference")
 			}
-			end += start
-			i = end
-		} else {
-			for end < len(replacement) && (isASCIILetterOrDigit(replacement[end]) || replacement[end] == '_') {
-				end++
-			}
-			if end == start {
-				continue
-			}
-			i = end - 1
+			continue
 		}
-		name := replacement[start:end]
-		if name == "" {
-			return fmt.Errorf("is empty")
-		}
-		if index, err := strconv.Atoi(name); err == nil {
-			if index < 0 || index > pattern.NumSubexp() {
+		replacement = rest
+		if number >= 0 {
+			if number > pattern.NumSubexp() {
 				return fmt.Errorf("$%s does not exist", name)
 			}
-			continue
-		}
-		if pattern.SubexpIndex(name) < 0 {
+		} else if pattern.SubexpIndex(name) < 0 {
 			return fmt.Errorf("$%s does not exist", name)
 		}
 	}
 	return nil
+}
+
+func extractReplacementToken(value string) (name string, number int, rest string, ok bool) {
+	if value == "" {
+		return "", 0, "", false
+	}
+	braced := value[0] == '{'
+	if braced {
+		value = value[1:]
+	}
+
+	end := 0
+	for end < len(value) {
+		r, size := utf8.DecodeRuneInString(value[end:])
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '_' {
+			break
+		}
+		end += size
+	}
+	if end == 0 {
+		return "", 0, "", false
+	}
+	name = value[:end]
+	if braced {
+		if end >= len(value) || value[end] != '}' {
+			return "", 0, "", false
+		}
+		end++
+	}
+
+	number = 0
+	for i := range len(name) {
+		if name[i] < '0' || name[i] > '9' || number >= 1e8 {
+			number = -1
+			break
+		}
+		number = number*10 + int(name[i]-'0')
+	}
+	if name[0] == '0' && len(name) > 1 {
+		number = -1
+	}
+	return name, number, value[end:], true
 }
 
 // NormalizeDockerRepository returns the comparison form for exact repository entries.

@@ -27,6 +27,13 @@ func TestScanManagedDirectoryRolesFindsOnlyExactTaskActions(t *testing.T) {
 	writeTaskFile(t, rolesPath, "capable", "tasks/nested/more.yml", `
 - ansible.builtin.include_tasks: "  {{ resources_tasks_path }}/directories/create_directories.yml  "
 `)
+	writeTaskFile(t, rolesPath, "multi_document", "tasks/main.yml", `
+---
+- ansible.builtin.include_tasks: "{{ resources_tasks_path }}/directories/create_directories.yml"
+---
+- block:
+    - ansible.builtin.include_tasks: "{{ resources_tasks_path }}/directories/create_directories.yml"
+`)
 	writeTaskFile(t, rolesPath, "short", "tasks/main.yml", `
 - include_tasks: "{{ resources_tasks_path }}/directories/create_directories.yml"
 `)
@@ -54,19 +61,49 @@ func TestScanManagedDirectoryRolesFindsOnlyExactTaskActions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ScanManagedDirectoryRoles() error = %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("ScanManagedDirectoryRoles() = %v, want only capable", got)
+	if len(got) != 2 {
+		t.Fatalf("ScanManagedDirectoryRoles() = %v, want capable and multi_document", got)
 	}
-	if _, exists := got["capable"]; !exists {
-		t.Fatalf("ScanManagedDirectoryRoles() = %v, want capable", got)
+	for _, roleName := range []string{"capable", "multi_document"} {
+		if _, exists := got[roleName]; !exists {
+			t.Errorf("ScanManagedDirectoryRoles() = %v, want %s", got, roleName)
+		}
 	}
 
 	_, occurrences, err := scanManagedDirectoryRoles(rolesPath)
 	if err != nil {
 		t.Fatalf("scanManagedDirectoryRoles() error = %v", err)
 	}
-	if occurrences != 3 {
-		t.Fatalf("scanManagedDirectoryRoles() occurrences = %d, want 3", occurrences)
+	if occurrences != 5 {
+		t.Fatalf("scanManagedDirectoryRoles() occurrences = %d, want 5", occurrences)
+	}
+}
+
+func TestScanManagedDirectoryRolesIgnoresActionShapedTaskData(t *testing.T) {
+	rolesPath := filepath.Join(t.TempDir(), "roles")
+	writeTaskFile(t, rolesPath, "module_arguments", "tasks/main.yml", `
+- name: debug nested data
+  ansible.builtin.debug:
+    msg:
+      ansible.builtin.include_tasks: "{{ resources_tasks_path }}/directories/create_directories.yml"
+`)
+	writeTaskFile(t, rolesPath, "task_vars", "tasks/main.yml", `
+- name: define action-shaped variable data
+  vars:
+    ansible.builtin.include_tasks: "{{ resources_tasks_path }}/directories/create_directories.yml"
+  ansible.builtin.debug:
+    msg: done
+`)
+
+	roles, occurrences, err := scanManagedDirectoryRoles(rolesPath)
+	if err != nil {
+		t.Fatalf("scanManagedDirectoryRoles() error = %v", err)
+	}
+	if len(roles) != 0 {
+		t.Fatalf("scanManagedDirectoryRoles() = %v, want no capable roles", roles)
+	}
+	if occurrences != 0 {
+		t.Fatalf("scanManagedDirectoryRoles() occurrences = %d, want 0", occurrences)
 	}
 }
 

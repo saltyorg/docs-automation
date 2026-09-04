@@ -78,18 +78,48 @@ func countManagedDirectoryIncludes(content []byte) (int, error) {
 }
 
 func countManagedDirectoryIncludesInNode(node *yaml.Node) int {
-	count := 0
-	if node.Kind == yaml.MappingNode {
-		for i := 0; i+1 < len(node.Content); i += 2 {
-			key, value := node.Content[i], node.Content[i+1]
-			if key.Kind == yaml.ScalarNode && key.Value == "ansible.builtin.include_tasks" &&
-				value.Kind == yaml.ScalarNode && strings.TrimSpace(value.Value) == managedDirectoriesTask {
-				count++
-			}
+	switch node.Kind {
+	case yaml.DocumentNode:
+		count := 0
+		for _, child := range node.Content {
+			count += countManagedDirectoryIncludesInTaskList(child)
 		}
+		return count
+	case yaml.SequenceNode:
+		return countManagedDirectoryIncludesInTaskList(node)
+	default:
+		return 0
 	}
-	for _, child := range node.Content {
-		count += countManagedDirectoryIncludesInNode(child)
+}
+
+func countManagedDirectoryIncludesInTaskList(node *yaml.Node) int {
+	if node.Kind != yaml.SequenceNode {
+		return 0
+	}
+	count := 0
+	for _, task := range node.Content {
+		count += countManagedDirectoryIncludesInTask(task)
+	}
+	return count
+}
+
+func countManagedDirectoryIncludesInTask(task *yaml.Node) int {
+	if task.Kind != yaml.MappingNode {
+		return 0
+	}
+	count := 0
+	for i := 0; i+1 < len(task.Content); i += 2 {
+		key, value := task.Content[i], task.Content[i+1]
+		if key.Kind != yaml.ScalarNode {
+			continue
+		}
+		if key.Value == "ansible.builtin.include_tasks" && value.Kind == yaml.ScalarNode &&
+			strings.TrimSpace(value.Value) == managedDirectoriesTask {
+			count++
+		}
+		if key.Value == "block" || key.Value == "rescue" || key.Value == "always" {
+			count += countManagedDirectoryIncludesInTaskList(value)
+		}
 	}
 	return count
 }

@@ -155,3 +155,24 @@ func TestValidateAutomationFrontmatter(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateAutomationFrontmatterPurposeWhitespace(t *testing.T) {
+	fm := &Frontmatter{SaltboxAutomation: &SaltboxAutomationConfig{
+		AppLinks: []AppLink{
+			{Name: "Whitespace", Purpose: AppLinkPurpose(" \t")},
+			{Name: "Padded", Purpose: AppLinkPurpose(" release ")},
+		},
+		ProjectDescription: &ProjectDescription{Name: "Links", Summary: "Purpose whitespace."},
+	}}
+
+	got := ValidateAutomationFrontmatter(fm)
+	want := []string{"app_link_purpose_required", "app_link_purpose_invalid"}
+	if len(got) != len(want) {
+		t.Fatalf("diagnostics = %+v, want codes %v", got, want)
+	}
+	for i, code := range want {
+		if got[i].Code != code {
+			t.Errorf("diagnostics[%d].Code = %q, want %q", i, got[i].Code, code)
+		}
+	}
+}

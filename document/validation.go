@@ -31,19 +31,19 @@ func ValidateAutomationFrontmatter(fm *Frontmatter) []Diagnostic {
 			})
 		}
 
-		purpose := AppLinkPurpose(strings.TrimSpace(string(link.Purpose)))
+		purposeText := string(link.Purpose)
 		switch {
-		case purpose == "":
+		case strings.TrimSpace(purposeText) == "":
 			diagnostics = append(diagnostics, Diagnostic{
 				Code:    "app_link_purpose_required",
 				Message: fmt.Sprintf("app_links[%d].purpose is required", i),
 			})
-		case !purpose.valid():
+		case !link.Purpose.valid():
 			diagnostics = append(diagnostics, Diagnostic{
 				Code:    "app_link_purpose_invalid",
 				Message: fmt.Sprintf("app_links[%d].purpose %q is invalid", i, link.Purpose),
 			})
-		case purpose.RequiresURL() && strings.TrimSpace(link.URL) == "":
+		case link.Purpose.RequiresURL() && strings.TrimSpace(link.URL) == "":
 			diagnostics = append(diagnostics, Diagnostic{
 				Code:    "app_link_url_required",
 				Message: fmt.Sprintf("app_links[%d].url is required", i),

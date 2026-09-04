@@ -107,6 +107,41 @@ func TestScanManagedDirectoryRolesReportsRootAndTaskFailures(t *testing.T) {
 	})
 }
 
+func TestScanManagedDirectoryRolesCurrentCorpus(t *testing.T) {
+	if os.Getenv("DOCS_AUTOMATION_CORPUS") != "1" {
+		t.Skip("set DOCS_AUTOMATION_CORPUS=1 with the reviewed Saltbox and Sandbox checkouts")
+	}
+
+	repositories := []struct {
+		name         string
+		rolesPath    string
+		negativeRole string
+	}{
+		{name: "saltbox", rolesPath: "/srv/git/saltbox/roles", negativeRole: "transfer"},
+		{name: "sandbox", rolesPath: "/opt/sandbox/roles", negativeRole: "booklore"},
+	}
+	totalRoles := 0
+	totalOccurrences := 0
+	for _, repository := range repositories {
+		roles, occurrences, err := scanManagedDirectoryRoles(repository.rolesPath)
+		if err != nil {
+			t.Fatalf("scanManagedDirectoryRoles(%s) error = %v", repository.name, err)
+		}
+		if _, exists := roles[repository.negativeRole]; exists {
+			t.Errorf("%s role %q unexpectedly has managed-directory capability", repository.name, repository.negativeRole)
+		}
+		totalRoles += len(roles)
+		totalOccurrences += occurrences
+	}
+
+	if totalRoles != 198 {
+		t.Errorf("managed-directory roles = %d, want 198", totalRoles)
+	}
+	if totalOccurrences != 201 {
+		t.Errorf("managed-directory include occurrences = %d, want 201", totalOccurrences)
+	}
+}
+
 func writeTaskFile(t *testing.T, rolesPath, roleName, relativePath, content string) {
 	t.Helper()
 	path := filepath.Join(rolesPath, roleName, relativePath)

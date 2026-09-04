@@ -253,8 +253,10 @@ func (r *Runner) updateRoleWithResult(ctx context.Context, cfg *config.Config, s
 
 	inventorySkipReason := ""
 	var roleInfo *parser.RoleInfo
-	needsInventoryRole := fmConfig.IsInventorySectionEnabled() && manager.HasVariablesSection(doc)
-	needsMetadataRole := cfg.DockerMetadata.Enabled() && fmConfig.IsOverviewSectionEnabled()
+	inventoryEnabled := fmConfig.IsInventorySectionEnabled()
+	overviewEnabled := fmConfig.IsOverviewSectionEnabled()
+	needsInventoryRole := inventoryEnabled && manager.HasVariablesSection(doc)
+	needsMetadataRole := cfg.DockerMetadata.Enabled() && overviewEnabled
 	if needsInventoryRole || needsMetadataRole {
 		if _, err := os.Stat(defaultsPath); os.IsNotExist(err) {
 			if needsInventoryRole {
@@ -285,7 +287,16 @@ func (r *Runner) updateRoleWithResult(ctx context.Context, cfg *config.Config, s
 		}
 	}
 
-	// Update inventory section if enabled
+	if !inventoryEnabled && manager.HasVariablesSection(doc) {
+		if err := manager.UpdateVariablesSection(doc, ""); err != nil {
+			result.Status = github.StatusError
+			result.Error = fmt.Sprintf("clearing variables section: %v", err)
+			return result
+		}
+		result.Sections = append(result.Sections, "variables")
+	}
+
+	// Update inventory section if enabled.
 	if needsInventoryRole && roleInfo != nil {
 		// Skip if no variables (use filtered count for this check)
 		filteredVars := parser.FilterVariables(roleInfo.AllVariables, roleName)
@@ -320,8 +331,17 @@ func (r *Runner) updateRoleWithResult(ctx context.Context, cfg *config.Config, s
 		}
 	}
 
-	// Update overview section if enabled and the document has the section
-	if fmConfig.IsOverviewSectionEnabled() && manager.HasOverviewSection(doc) {
+	if !overviewEnabled && manager.HasOverviewSection(doc) {
+		if err := manager.UpdateOverviewSection(doc, ""); err != nil {
+			result.Status = github.StatusError
+			result.Error = fmt.Sprintf("clearing overview section: %v", err)
+			return result
+		}
+		result.Sections = append(result.Sections, "overview")
+	}
+
+	// Update overview section if enabled and the document has the section.
+	if overviewEnabled && manager.HasOverviewSection(doc) {
 		tableGen := render.NewTableGenerator(cfg.OverviewTemplatePath())
 		if err := tableGen.LoadTemplate(); err != nil {
 			result.Status = github.StatusError

@@ -38,6 +38,18 @@ func TestUpdateManagedSection(t *testing.T) {
 	}
 }
 
+func TestUpdateManagedSectionClearsContentWithoutAddingABlankLine(t *testing.T) {
+	content := "before\n<!-- BEGIN TEST -->\nold\n<!-- END TEST -->\nafter\n"
+	got, err := UpdateManagedSection(content, "TEST", "")
+	if err != nil {
+		t.Fatalf("UpdateManagedSection() error = %v", err)
+	}
+	want := "before\n<!-- BEGIN TEST -->\n<!-- END TEST -->\nafter\n"
+	if got != want {
+		t.Fatalf("cleared content = %q, want %q", got, want)
+	}
+}
+
 func TestUpdateManagedSectionRejectsMissingMarkers(t *testing.T) {
 	_, err := UpdateManagedSection("# Sonarr\n", "TEST", "new")
 	if err == nil || !strings.Contains(err.Error(), `managed section "TEST" not found`) {

@@ -106,8 +106,8 @@ reported as warnings.
 
 `generate` is an explicit preview operation. It can render inventory content
 even when an existing page has `disabled: true` or
-`sections.inventory: false`; those fields control in-place automation and
-coverage enforcement.
+`sections.inventory: false`; those fields control in-place reconciliation and
+coverage enforcement, not preview rendering.
 
 #### `sb-docs cli`
 
@@ -672,9 +672,9 @@ saltbox_automation:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `disabled` | bool | `false` | Skip in-place updates and managed-section coverage checks for the page |
+| `disabled` | bool | `false` | Freeze all in-place content and skip managed-section coverage checks for the page |
 | `checks` | object | enabled defaults | Per-page docs-health category opt-outs |
-| `sections` | object | enabled defaults | Enable inventory and overview updates independently |
+| `sections` | object | enabled defaults | Reconcile inventory and overview sections independently |
 | `inventory` | object | empty filters | Filter rendered sections and override examples |
 | `app_links` | list | `[]` | Buttons rendered in the managed overview |
 | `project_description` | object or null | `null` | Project metadata rendered in the managed overview |
@@ -683,11 +683,13 @@ saltbox_automation:
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `inventory` | bool | `true` | Update and require the variables managed section |
-| `overview` | bool | `true` | Update and require the overview managed section |
+| `inventory` | bool | `true` | Render and require the variables managed section; `false` keeps an existing section empty |
+| `overview` | bool | `true` | Render and require the overview managed section; `false` keeps an existing section empty |
 
-`disabled: true` takes precedence over both. A section is updated only when it
-is enabled and the corresponding marker pair exists.
+`disabled: true` takes precedence over both and preserves all existing content.
+An explicitly disabled section with a marker pair is cleared while retaining
+the markers; missing markers are not created. An enabled section is rendered
+only when its marker pair exists.
 
 ### `checks`
 

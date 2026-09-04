@@ -83,9 +83,11 @@ func UpdateManagedSection(content, sectionName, newContent string) (string, erro
 	builder.WriteString(content[:section.StartIndex])
 	builder.WriteString(startMarker)
 	builder.WriteString("\n")
-	builder.WriteString(newContent)
-	if !strings.HasSuffix(newContent, "\n") {
-		builder.WriteString("\n")
+	if newContent != "" {
+		builder.WriteString(newContent)
+		if !strings.HasSuffix(newContent, "\n") {
+			builder.WriteString("\n")
+		}
 	}
 	builder.WriteString(endMarker)
 	builder.WriteString(content[section.EndIndex:])

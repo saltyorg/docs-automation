@@ -2,6 +2,8 @@ package parser
 
 import (
 	"bufio"
+	"bytes"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -433,16 +435,10 @@ func InferRoleVarType(suffix, line string) string {
 	return String
 }
 
-// ScanInventoryForRoleVarLookups scans the inventory file for all role_var lookups.
+// ScanRoleVarLookups scans authoritative source files for all role_var lookups.
 // It returns a map of suffix -> inferred type, excluding ignored suffixes.
-func ScanInventoryForRoleVarLookups(inventoryPath string, ignoreSuffixes []string) (map[string]string, error) {
+func ScanRoleVarLookups(sourcePaths, ignoreSuffixes []string) (map[string]string, error) {
 	lookups := make(map[string]string)
-
-	file, err := os.Open(inventoryPath)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = file.Close() }()
 
 	// Build ignore set for quick lookup
 	ignoreSet := make(map[string]bool)
@@ -450,34 +446,46 @@ func ScanInventoryForRoleVarLookups(inventoryPath string, ignoreSuffixes []strin
 		ignoreSet[suffix] = true
 	}
 
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := scanner.Text()
+	for _, sourcePath := range sourcePaths {
+		content, err := os.ReadFile(sourcePath)
+		if err != nil {
+			return nil, fmt.Errorf("reading role_var source %s: %w", sourcePath, err)
+		}
 
-		// Find all role_var lookups in this line
-		for _, match := range roleVarLookupRe.FindAllStringSubmatch(line, -1) {
-			if len(match) > 1 {
-				suffix := match[1]
+		scanner := bufio.NewScanner(bytes.NewReader(content))
+		for scanner.Scan() {
+			line := scanner.Text()
 
-				// Skip ignored suffixes
-				if ignoreSet[suffix] {
-					continue
-				}
+			// Find all role_var lookups in this line
+			for _, match := range roleVarLookupRe.FindAllStringSubmatch(line, -1) {
+				if len(match) > 1 {
+					suffix := match[1]
 
-				// Infer type from context
-				inferredType := InferRoleVarType(suffix, line)
+					// Skip ignored suffixes
+					if ignoreSet[suffix] {
+						continue
+					}
 
-				// Store or update (keep more specific type if already exists)
-				if existing, exists := lookups[suffix]; !exists || existing == "string" {
-					lookups[suffix] = inferredType
+					// Infer type from context
+					inferredType := InferRoleVarType(suffix, line)
+
+					// Store or update (keep more specific type if already exists)
+					if existing, exists := lookups[suffix]; !exists || existing == String {
+						lookups[suffix] = inferredType
+					}
 				}
 			}
 		}
-	}
 
-	if err := scanner.Err(); err != nil {
-		return nil, err
+		if err := scanner.Err(); err != nil {
+			return nil, fmt.Errorf("scanning role_var source %s: %w", sourcePath, err)
+		}
 	}
 
 	return lookups, nil
+}
+
+// ScanInventoryForRoleVarLookups scans one inventory source for role_var lookups.
+func ScanInventoryForRoleVarLookups(inventoryPath string, ignoreSuffixes []string) (map[string]string, error) {
+	return ScanRoleVarLookups([]string{inventoryPath}, ignoreSuffixes)
 }

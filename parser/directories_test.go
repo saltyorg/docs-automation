@@ -1,0 +1,119 @@
+package parser
+
+import (
+	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestScanManagedDirectoryRolesFindsOnlyExactTaskActions(t *testing.T) {
+	rolesPath := filepath.Join(t.TempDir(), "roles")
+	writeTaskFile(t, rolesPath, "capable", "tasks/main.yml", `
+- name: create directories
+  block:
+    - name: primary include
+      ansible.builtin.include_tasks: >-
+        {{ resources_tasks_path }}/directories/create_directories.yml
+      when: capable_enabled
+  rescue:
+    - ansible.builtin.include_tasks: "{{ resources_tasks_path }}/directories/create_directories.yml"
+  always:
+    - debug:
+        msg: done
+`)
+	writeTaskFile(t, rolesPath, "capable", "tasks/nested/more.yml", `
+- ansible.builtin.include_tasks: "  {{ resources_tasks_path }}/directories/create_directories.yml  "
+`)
+	writeTaskFile(t, rolesPath, "short", "tasks/main.yml", `
+- include_tasks: "{{ resources_tasks_path }}/directories/create_directories.yml"
+`)
+	writeTaskFile(t, rolesPath, "imported", "tasks/main.yml", `
+- ansible.builtin.import_tasks: "{{ resources_tasks_path }}/directories/create_directories.yml"
+`)
+	writeTaskFile(t, rolesPath, "relative", "tasks/main.yml", `
+- ansible.builtin.include_tasks: "../../resources/tasks/directories/create_directories.yml"
+`)
+	writeTaskFile(t, rolesPath, "indirect", "tasks/main.yml", `
+- ansible.builtin.include_tasks: other_role.yml
+- debug:
+    msg: "{{ resources_tasks_path }}/directories/create_directories.yml"
+# ansible.builtin.include_tasks: "{{ resources_tasks_path }}/directories/create_directories.yml"
+`)
+	writeTaskFile(t, rolesPath, "ignored_extension", "tasks/main.yaml", `
+- ansible.builtin.include_tasks: "{{ resources_tasks_path }}/directories/create_directories.yml"
+`)
+	writeTaskFile(t, rolesPath, "ignored_extension", "tasks/notes.txt", "not: [valid")
+	if err := os.MkdirAll(filepath.Join(rolesPath, "missing_tasks"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := ScanManagedDirectoryRoles(rolesPath)
+	if err != nil {
+		t.Fatalf("ScanManagedDirectoryRoles() error = %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ScanManagedDirectoryRoles() = %v, want only capable", got)
+	}
+	if _, exists := got["capable"]; !exists {
+		t.Fatalf("ScanManagedDirectoryRoles() = %v, want capable", got)
+	}
+
+	_, occurrences, err := scanManagedDirectoryRoles(rolesPath)
+	if err != nil {
+		t.Fatalf("scanManagedDirectoryRoles() error = %v", err)
+	}
+	if occurrences != 3 {
+		t.Fatalf("scanManagedDirectoryRoles() occurrences = %d, want 3", occurrences)
+	}
+}
+
+func TestScanManagedDirectoryRolesReportsRootAndTaskFailures(t *testing.T) {
+	t.Run("missing root", func(t *testing.T) {
+		rolesPath := filepath.Join(t.TempDir(), "missing")
+		_, err := ScanManagedDirectoryRoles(rolesPath)
+		if err == nil || !errors.Is(err, fs.ErrNotExist) || !strings.Contains(err.Error(), rolesPath) {
+			t.Fatalf("error = %v, want contextual %s fs.ErrNotExist", err, rolesPath)
+		}
+	})
+
+	t.Run("unreadable task", func(t *testing.T) {
+		rolesPath := filepath.Join(t.TempDir(), "roles")
+		taskPath := filepath.Join(rolesPath, "broken", "tasks", "main.yml")
+		if err := os.MkdirAll(filepath.Dir(taskPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(filepath.Join(rolesPath, "missing.yml"), taskPath); err != nil {
+			t.Fatal(err)
+		}
+
+		_, err := ScanManagedDirectoryRoles(rolesPath)
+		if err == nil || !errors.Is(err, fs.ErrNotExist) || !strings.Contains(err.Error(), taskPath) {
+			t.Fatalf("error = %v, want contextual %s fs.ErrNotExist", err, taskPath)
+		}
+	})
+
+	t.Run("invalid task YAML", func(t *testing.T) {
+		rolesPath := filepath.Join(t.TempDir(), "roles")
+		taskPath := filepath.Join(rolesPath, "broken", "tasks", "main.yml")
+		writeTaskFile(t, rolesPath, "broken", "tasks/main.yml", "- block: [\n")
+
+		_, err := ScanManagedDirectoryRoles(rolesPath)
+		if err == nil || !strings.Contains(err.Error(), taskPath) {
+			t.Fatalf("error = %v, want contextual YAML failure for %s", err, taskPath)
+		}
+	})
+}
+
+func writeTaskFile(t *testing.T, rolesPath, roleName, relativePath, content string) {
+	t.Helper()
+	path := filepath.Join(rolesPath, roleName, relativePath)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

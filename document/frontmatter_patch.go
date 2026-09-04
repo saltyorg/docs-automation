@@ -175,7 +175,7 @@ func mappingValue(mapping *yaml.Node, key string) (*yaml.Node, *yaml.Node, bool,
 	var keyNode, valueNode *yaml.Node
 	for i := 0; i+1 < len(mapping.Content); i += 2 {
 		candidate := mapping.Content[i]
-		if candidate.Tag == "!!merge" || candidate.Value == "<<" {
+		if candidate.Tag == "!!merge" {
 			return nil, nil, false, fmt.Errorf("merge keys are not supported in target mapping")
 		}
 		if candidate.Kind == yaml.ScalarNode && candidate.Value == key {
@@ -394,6 +394,11 @@ func encodeInsertedScalar(value string) (string, error) {
 }
 
 func (s frontmatterSource) scalarTokenRange(keyNode, valueNode *yaml.Node) (start, end int, implicit, commentFollows bool, err error) {
+	if valueNode.Style&(yaml.SingleQuotedStyle|yaml.DoubleQuotedStyle) != 0 {
+		start, end, err := s.quotedScalarTokenRange(valueNode)
+		return start, end, false, false, err
+	}
+
 	if valueNode.Line > keyNode.Line {
 		lineStart, lineEnd, lineErr := s.lineRange(valueNode.Line)
 		if lineErr != nil {
@@ -449,6 +454,48 @@ func (s frontmatterSource) scalarTokenRange(keyNode, valueNode *yaml.Node) (star
 		return lineStart + areaStart, lineStart + areaEnd, true, commentFollows, nil
 	}
 	return lineStart + tokenStart, lineStart + tokenEnd, false, commentFollows, nil
+}
+
+func (s frontmatterSource) quotedScalarTokenRange(valueNode *yaml.Node) (int, int, error) {
+	lineStart, lineEnd, err := s.lineRange(valueNode.Line)
+	if err != nil {
+		return 0, 0, err
+	}
+	start := lineStart + valueNode.Column - 1
+	if start < lineStart || start >= lineEnd {
+		return 0, 0, fmt.Errorf("invalid value column %d", valueNode.Column)
+	}
+
+	quote := byte('\'')
+	if valueNode.Style&yaml.DoubleQuotedStyle != 0 {
+		quote = '"'
+	}
+	if s.content[start] != quote {
+		return 0, 0, fmt.Errorf("quoted scalar does not start with %q", quote)
+	}
+
+	for i := start + 1; i < s.span.yamlEnd; i++ {
+		if s.content[i] != quote {
+			continue
+		}
+		if quote == '\'' && i+1 < s.span.yamlEnd && s.content[i+1] == '\'' {
+			i++
+			continue
+		}
+		if quote == '"' && doubleQuoteEscaped(s.content, start, i) {
+			continue
+		}
+		return start, i + 1, nil
+	}
+	return 0, 0, fmt.Errorf("quoted scalar is not terminated")
+}
+
+func doubleQuoteEscaped(content []byte, start, quote int) bool {
+	backslashes := 0
+	for i := quote - 1; i > start && content[i] == '\\'; i-- {
+		backslashes++
+	}
+	return backslashes%2 != 0
 }
 
 func yamlCommentStart(line []byte, start int) int {

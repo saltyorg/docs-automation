@@ -85,6 +85,49 @@ func TestUpdateDockerMetadataPreservesEachNonEmptyAuthorField(t *testing.T) {
 	}
 }
 
+func TestUpdateDockerMetadataPreservesExistingAuthorURLBytes(t *testing.T) {
+	frontmatter := "---\nicon: \nsaltbox_automation:\n  app_links:\n    - name: \n      url: 'https://author.invalid/releases' # author URL\n      type: author-type\n      purpose: release\n  project_description:\n    name: Sonarr\n    summary: Summary\n---\n"
+	fixture := newDockerUpdateFixture(t, frontmatter, false, false)
+	result := NewRunner(new(bytes.Buffer), new(bytes.Buffer), false).updateRoleWithResult(
+		t.Context(), fixture.cfg, render.SourceCatalog{}, "sonarr", "saltbox",
+	)
+	content := fixture.readDoc(t)
+	if result.Status != github.StatusUpdated {
+		t.Fatalf("status = %s, error = %q", result.Status, result.Error)
+	}
+	if !strings.Contains(content, "url: 'https://author.invalid/releases' # author URL") {
+		t.Fatalf("author URL bytes changed:\n%s", content)
+	}
+	if strings.Contains(content, "url: https://hub.docker.com") || !strings.Contains(content, "type: author-type") {
+		t.Fatalf("derived URL or type replaced author fields:\n%s", content)
+	}
+}
+
+func TestUpdateDockerMetadataFillsMissingReleaseLinkKeys(t *testing.T) {
+	frontmatter := "---\nicon: \nsaltbox_automation:\n  app_links:\n    - type: author-type\n      purpose: release\n  project_description:\n    name: Sonarr\n    summary: Summary\n---\n"
+	fixture := newDockerUpdateFixture(t, frontmatter, false, false)
+	result := NewRunner(new(bytes.Buffer), new(bytes.Buffer), false).updateRoleWithResult(
+		t.Context(), fixture.cfg, render.SourceCatalog{}, "sonarr", "saltbox",
+	)
+	content := fixture.readDoc(t)
+	if result.Status != github.StatusUpdated {
+		t.Fatalf("status = %s, error = %q", result.Status, result.Error)
+	}
+	for _, want := range []string{
+		"name: Image tags",
+		"url: https://hub.docker.com/r/linuxserver/sonarr/tags",
+		"type: author-type",
+		"purpose: release",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("updated document missing %q:\n%s", want, content)
+		}
+	}
+	if strings.Count(content, "purpose: release") != 1 {
+		t.Fatalf("release link was created instead of filled:\n%s", content)
+	}
+}
+
 func TestUpdateDockerMetadataRequiresEnabledPageAndOverviewAutomation(t *testing.T) {
 	tests := []struct {
 		name       string

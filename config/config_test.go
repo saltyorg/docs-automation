@@ -637,3 +637,120 @@ func TestValidateDockerVariableTypesRejectsDuplicateSuffix(t *testing.T) {
 		t.Fatal("validateDockerVariableTypes() error is nil, want duplicate suffix error")
 	}
 }
+
+func TestDockerMetadataParsesTypedResolutionConfig(t *testing.T) {
+	const input = `
+docker_metadata:
+  icon: material/docker
+  release_link:
+    name: Image tags
+  overrides:
+    ghcr.io/imagegenius/immich:
+      url: https://github.com/imagegenius/docker-immich/pkgs/container/immich
+      type: github
+  rules:
+    - pattern: ^ghcr.io/([^/]+)/([^/]+)$
+      url: https://github.com/$1/$2/pkgs/container/$2
+      type: github
+  ignore:
+    - docker.elastic.co/elasticsearch/elasticsearch
+`
+
+	var cfg Config
+	if err := yaml.Unmarshal([]byte(input), &cfg); err != nil {
+		t.Fatalf("unmarshalling docker metadata: %v", err)
+	}
+	if cfg.DockerMetadata.Icon != "material/docker" || cfg.DockerMetadata.ReleaseLink.Name != "Image tags" {
+		t.Fatalf("DockerMetadata = %#v", cfg.DockerMetadata)
+	}
+	override := cfg.DockerMetadata.Overrides["ghcr.io/imagegenius/immich"]
+	if override.URL == "" || override.Type != "github" {
+		t.Fatalf("override = %#v", override)
+	}
+	if len(cfg.DockerMetadata.Rules) != 1 || cfg.DockerMetadata.Rules[0].Pattern == "" || cfg.DockerMetadata.Rules[0].Type != "github" {
+		t.Fatalf("rules = %#v", cfg.DockerMetadata.Rules)
+	}
+	if len(cfg.DockerMetadata.Ignore) != 1 {
+		t.Fatalf("ignore = %#v", cfg.DockerMetadata.Ignore)
+	}
+}
+
+func TestValidateDockerMetadataAcceptsEmptyOrCompleteConfig(t *testing.T) {
+	if err := validateDockerMetadata(DockerMetadataConfig{}); err != nil {
+		t.Fatalf("empty docker metadata error = %v", err)
+	}
+	valid := DockerMetadataConfig{
+		Icon:        "material/docker",
+		ReleaseLink: DockerMetadataReleaseLink{Name: "Image tags"},
+		Overrides: map[string]DockerMetadataTarget{
+			"ghcr.io/imagegenius/immich": {URL: "https://example.invalid/immich", Type: "github"},
+		},
+		Rules: []DockerMetadataRule{{
+			Pattern: `^ghcr\.io/([^/]+)/([^/]+)$`,
+			URL:     "https://github.com/$1/$2/pkgs/container/$2",
+			Type:    "github",
+		}},
+		Ignore: []string{"docker.elastic.co/elasticsearch/elasticsearch"},
+	}
+	if err := validateDockerMetadata(valid); err != nil {
+		t.Fatalf("complete docker metadata error = %v", err)
+	}
+}
+
+func TestValidateDockerMetadataRejectsInvalidValues(t *testing.T) {
+	base := DockerMetadataConfig{
+		Icon:        "material/docker",
+		ReleaseLink: DockerMetadataReleaseLink{Name: "Image tags"},
+	}
+	tests := []struct {
+		name   string
+		mutate func(*DockerMetadataConfig)
+		want   string
+	}{
+		{name: "missing icon", mutate: func(c *DockerMetadataConfig) { c.Icon = " " }, want: "icon"},
+		{name: "missing release name", mutate: func(c *DockerMetadataConfig) { c.ReleaseLink.Name = " " }, want: "release_link.name"},
+		{name: "blank override repository", mutate: func(c *DockerMetadataConfig) {
+			c.Overrides = map[string]DockerMetadataTarget{" ": {URL: "https://example.invalid", Type: "docker"}}
+		}, want: "overrides"},
+		{name: "blank override URL", mutate: func(c *DockerMetadataConfig) { c.Overrides = map[string]DockerMetadataTarget{"repo": {Type: "docker"}} }, want: "url"},
+		{name: "blank override type", mutate: func(c *DockerMetadataConfig) {
+			c.Overrides = map[string]DockerMetadataTarget{"repo": {URL: "https://example.invalid"}}
+		}, want: "type"},
+		{name: "unanchored rule", mutate: func(c *DockerMetadataConfig) {
+			c.Rules = []DockerMetadataRule{{Pattern: "repo/(.+)", URL: "https://example.invalid/$1", Type: "docker"}}
+		}, want: "anchored"},
+		{name: "invalid regexp", mutate: func(c *DockerMetadataConfig) {
+			c.Rules = []DockerMetadataRule{{Pattern: "^[$", URL: "https://example.invalid", Type: "docker"}}
+		}, want: "pattern"},
+		{name: "blank rule URL", mutate: func(c *DockerMetadataConfig) { c.Rules = []DockerMetadataRule{{Pattern: "^repo$", Type: "docker"}} }, want: "url"},
+		{name: "blank rule type", mutate: func(c *DockerMetadataConfig) {
+			c.Rules = []DockerMetadataRule{{Pattern: "^repo$", URL: "https://example.invalid"}}
+		}, want: "type"},
+		{name: "unknown numeric capture", mutate: func(c *DockerMetadataConfig) {
+			c.Rules = []DockerMetadataRule{{Pattern: "^repo/(.+)$", URL: "https://example.invalid/$2", Type: "docker"}}
+		}, want: "capture"},
+		{name: "unknown named capture", mutate: func(c *DockerMetadataConfig) {
+			c.Rules = []DockerMetadataRule{{Pattern: "^repo/(?P<name>.+)$", URL: "https://example.invalid/${missing}", Type: "docker"}}
+		}, want: "capture"},
+		{name: "blank ignore", mutate: func(c *DockerMetadataConfig) { c.Ignore = []string{" "} }, want: "ignore"},
+		{name: "normalized duplicate override", mutate: func(c *DockerMetadataConfig) {
+			c.Overrides = map[string]DockerMetadataTarget{"Repo/Image": {URL: "https://one.invalid", Type: "docker"}, " repo/image ": {URL: "https://two.invalid", Type: "docker"}}
+		}, want: "duplicate"},
+		{name: "normalized duplicate ignore", mutate: func(c *DockerMetadataConfig) { c.Ignore = []string{"Repo/Image", " repo/image "} }, want: "duplicate"},
+		{name: "override ignore conflict", mutate: func(c *DockerMetadataConfig) {
+			c.Overrides = map[string]DockerMetadataTarget{"Repo/Image": {URL: "https://example.invalid", Type: "docker"}}
+			c.Ignore = []string{" repo/image "}
+		}, want: "both"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := base
+			tt.mutate(&cfg)
+			err := validateDockerMetadata(cfg)
+			if err == nil || !strings.Contains(strings.ToLower(err.Error()), strings.ToLower(tt.want)) {
+				t.Fatalf("validateDockerMetadata() error = %v, want containing %q", err, tt.want)
+			}
+		})
+	}
+}

@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -18,6 +20,7 @@ type Config struct {
 	PathOverrides     map[string]map[string]string `yaml:"path_overrides"`
 	GlobalOverrides   GlobalOverrides              `yaml:"global_overrides"`
 	DockerOverrides   DockerOverrides              `yaml:"docker_overrides"`
+	DockerMetadata    DockerMetadataConfig         `yaml:"docker_metadata"`
 	SectionExplainers map[string]string            `yaml:"section_explainers"`
 	TypeInference     TypeInferenceConfig          `yaml:"type_inference"`
 	DockerVariables   DockerVariables              `yaml:"docker_variables"`
@@ -64,6 +67,38 @@ type DockerOverrideGroup struct {
 	Name       string   `yaml:"name"`
 	Primary    string   `yaml:"primary"`
 	Companions []string `yaml:"companions"`
+}
+
+// DockerMetadataConfig configures metadata derived from a role's primary image repository.
+type DockerMetadataConfig struct {
+	Icon        string                          `yaml:"icon"`
+	ReleaseLink DockerMetadataReleaseLink       `yaml:"release_link"`
+	Overrides   map[string]DockerMetadataTarget `yaml:"overrides"`
+	Rules       []DockerMetadataRule            `yaml:"rules"`
+	Ignore      []string                        `yaml:"ignore"`
+}
+
+// DockerMetadataReleaseLink configures the authored release-link label.
+type DockerMetadataReleaseLink struct {
+	Name string `yaml:"name"`
+}
+
+// DockerMetadataTarget is a resolved link destination and presentation type.
+type DockerMetadataTarget struct {
+	URL  string `yaml:"url"`
+	Type string `yaml:"type"`
+}
+
+// DockerMetadataRule maps a full image repository match to a link destination.
+type DockerMetadataRule struct {
+	Pattern string `yaml:"pattern"`
+	URL     string `yaml:"url"`
+	Type    string `yaml:"type"`
+}
+
+// Enabled reports whether Docker metadata derivation is configured.
+func (c DockerMetadataConfig) Enabled() bool {
+	return c.Icon != "" || c.ReleaseLink.Name != "" || len(c.Overrides) > 0 || len(c.Rules) > 0 || len(c.Ignore) > 0
 }
 
 // OverrideVarDef defines reusable override metadata.
@@ -282,6 +317,9 @@ func (c *Config) Validate() error {
 	if err := validateDockerVariableTypes(c.DockerVariables); err != nil {
 		return err
 	}
+	if err := validateDockerMetadata(c.DockerMetadata); err != nil {
+		return err
+	}
 	for _, check := range []struct {
 		name   string
 		config *CheckConfig
@@ -318,6 +356,117 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+func validateDockerMetadata(metadata DockerMetadataConfig) error {
+	if !metadata.Enabled() {
+		return nil
+	}
+	if strings.TrimSpace(metadata.Icon) == "" {
+		return fmt.Errorf("docker_metadata.icon is required")
+	}
+	if strings.TrimSpace(metadata.ReleaseLink.Name) == "" {
+		return fmt.Errorf("docker_metadata.release_link.name is required")
+	}
+
+	overrides := make(map[string]string, len(metadata.Overrides))
+	for repository, target := range metadata.Overrides {
+		normalized := NormalizeDockerRepository(repository)
+		if normalized == "" {
+			return fmt.Errorf("docker_metadata.overrides contains an empty repository")
+		}
+		if existing, ok := overrides[normalized]; ok {
+			return fmt.Errorf("docker_metadata.overrides contains duplicate repositories %q and %q", existing, repository)
+		}
+		overrides[normalized] = repository
+		if strings.TrimSpace(target.URL) == "" {
+			return fmt.Errorf("docker_metadata.overrides[%q].url is required", repository)
+		}
+		if strings.TrimSpace(target.Type) == "" {
+			return fmt.Errorf("docker_metadata.overrides[%q].type is required", repository)
+		}
+	}
+
+	for i, rule := range metadata.Rules {
+		if !strings.HasPrefix(rule.Pattern, "^") || !strings.HasSuffix(rule.Pattern, "$") {
+			return fmt.Errorf("docker_metadata.rules[%d].pattern must be anchored with ^ and $", i)
+		}
+		compiled, err := regexp.Compile(rule.Pattern)
+		if err != nil {
+			return fmt.Errorf("docker_metadata.rules[%d].pattern is invalid: %w", i, err)
+		}
+		if strings.TrimSpace(rule.URL) == "" {
+			return fmt.Errorf("docker_metadata.rules[%d].url is required", i)
+		}
+		if strings.TrimSpace(rule.Type) == "" {
+			return fmt.Errorf("docker_metadata.rules[%d].type is required", i)
+		}
+		if err := validateReplacementCaptures(rule.URL, compiled); err != nil {
+			return fmt.Errorf("docker_metadata.rules[%d].url capture reference: %w", i, err)
+		}
+	}
+
+	ignored := make(map[string]string, len(metadata.Ignore))
+	for i, repository := range metadata.Ignore {
+		normalized := NormalizeDockerRepository(repository)
+		if normalized == "" {
+			return fmt.Errorf("docker_metadata.ignore[%d] must not be empty", i)
+		}
+		if existing, ok := ignored[normalized]; ok {
+			return fmt.Errorf("docker_metadata.ignore contains duplicate repositories %q and %q", existing, repository)
+		}
+		ignored[normalized] = repository
+		if override, ok := overrides[normalized]; ok {
+			return fmt.Errorf("docker repository %q is present in both overrides and ignore", override)
+		}
+	}
+	return nil
+}
+
+func validateReplacementCaptures(replacement string, pattern *regexp.Regexp) error {
+	for i := 0; i < len(replacement); i++ {
+		if replacement[i] != '$' || i+1 >= len(replacement) {
+			continue
+		}
+		start := i + 1
+		end := start
+		if replacement[start] == '{' {
+			start++
+			end = strings.IndexByte(replacement[start:], '}')
+			if end < 0 {
+				return fmt.Errorf("has an unterminated reference")
+			}
+			end += start
+			i = end
+		} else {
+			for end < len(replacement) && (isASCIILetterOrDigit(replacement[end]) || replacement[end] == '_') {
+				end++
+			}
+			if end == start {
+				continue
+			}
+			i = end - 1
+		}
+		name := replacement[start:end]
+		if name == "" {
+			return fmt.Errorf("is empty")
+		}
+		if index, err := strconv.Atoi(name); err == nil {
+			if index < 0 || index > pattern.NumSubexp() {
+				return fmt.Errorf("$%s does not exist", name)
+			}
+			continue
+		}
+		if pattern.SubexpIndex(name) < 0 {
+			return fmt.Errorf("$%s does not exist", name)
+		}
+	}
+	return nil
+}
+
+// NormalizeDockerRepository returns the comparison form for exact repository entries.
+func NormalizeDockerRepository(repository string) string {
+	return strings.ToLower(strings.TrimSpace(repository))
 }
 
 func validateDockerVariableTypes(variables DockerVariables) error {

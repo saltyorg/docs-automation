@@ -171,7 +171,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document
 				if hideBase[v.Name] {
 					continue
 				}
-				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, roleTypes, cfg, fmConfig)
+				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, roleTypes, cfg)
 				sectionData.Variables = append(sectionData.Variables, varData)
 			}
 
@@ -206,7 +206,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document
 				if hideBase[v.Name] {
 					continue
 				}
-				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, roleTypes, cfg, fmConfig)
+				varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, roleTypes, cfg)
 				sectionData.Variables = append(sectionData.Variables, varData)
 			}
 
@@ -218,7 +218,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document
 					if hideBase[v.Name] {
 						continue
 					}
-					varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, roleTypes, cfg, fmConfig)
+					varData := buildVariableData(&v, role.Name, data.InstanceName, typeInfer, roleTypes, cfg)
 					sectionData.Subsections[subName] = append(sectionData.Subsections[subName], varData)
 				}
 			}
@@ -229,7 +229,7 @@ func BuildRoleData(role *parser.RoleInfo, cfg *config.Config, fmConfig *document
 
 	// Build DockerInfo if the role has docker variables and a Docker section is shown.
 	if len(roleDockerVars) > 0 && cfg != nil && shouldShowDockerInfo(role, fmConfig) {
-		promoteDockerOverrideGroups(data, cfg, roleDockerVars, typeInfer, fmConfig)
+		promoteDockerOverrideGroups(data, cfg, roleDockerVars, typeInfer)
 		data.DockerInfo = buildDockerInfo(cfg, role.Name, roleDockerVars, sources.DockerVarSuffixes)
 	}
 
@@ -454,7 +454,7 @@ func configuredDockerVariableType(cfg *config.Config, suffix string) string {
 	return parser.String
 }
 
-func promoteDockerOverrideGroups(data *RoleData, cfg *config.Config, roleDockerVars []string, typeInfer *parser.TypeInferrer, fmConfig *document.SaltboxAutomationConfig) {
+func promoteDockerOverrideGroups(data *RoleData, cfg *config.Config, roleDockerVars []string, typeInfer *parser.TypeInferrer) {
 	section := data.Sections["Docker"]
 	if section == nil {
 		return
@@ -478,7 +478,7 @@ func promoteDockerOverrideGroups(data *RoleData, cfg *config.Config, roleDockerV
 		for _, suffix := range members {
 			variable := existing[suffix]
 			if variable == nil {
-				variable = buildDockerOverrideVariableData(data.RoleName, data.InstanceName, variablePrefix, suffix, typeInfer, cfg, fmConfig)
+				variable = buildDockerOverrideVariableData(data.RoleName, data.InstanceName, variablePrefix, suffix, typeInfer, cfg)
 			}
 			variable.Comment = ""
 			variable.CommentLines = nil
@@ -567,7 +567,7 @@ func insertDockerOverrideGroup(section *SectionData, groupName string, variables
 	section.Variables = append(section.Variables, variables...)
 }
 
-func buildDockerOverrideVariableData(roleName, instanceName, variablePrefix, suffix string, typeInfer *parser.TypeInferrer, cfg *config.Config, fmConfig *document.SaltboxAutomationConfig) *VariableData {
+func buildDockerOverrideVariableData(roleName, instanceName, variablePrefix, suffix string, typeInfer *parser.TypeInferrer, cfg *config.Config) *VariableData {
 	varDef, _ := findDockerOverride(cfg.DockerOverrides.Variables, suffix)
 	rawValue := ""
 	if varDef.Default != nil {
@@ -578,7 +578,7 @@ func buildDockerOverrideVariableData(roleName, instanceName, variablePrefix, suf
 		RawValue: rawValue,
 		Section:  "Docker",
 	}
-	return buildVariableData(&variable, roleName, instanceName, typeInfer, nil, cfg, fmConfig)
+	return buildVariableData(&variable, roleName, instanceName, typeInfer, nil, cfg)
 }
 
 func dockerOverrideGroupMembers(group config.DockerOverrideGroup) []string {
@@ -664,20 +664,12 @@ func buildReferenceTypes(cfg *config.Config) map[string]string {
 }
 
 // buildVariableData creates VariableData from a parsed Variable.
-func buildVariableData(v *parser.Variable, roleName, instanceName string, typeInfer *parser.TypeInferrer, roleTypes map[string]string, cfg *config.Config, fmConfig *document.SaltboxAutomationConfig) *VariableData {
-	// Check for example override
+func buildVariableData(v *parser.Variable, roleName, instanceName string, typeInfer *parser.TypeInferrer, roleTypes map[string]string, cfg *config.Config) *VariableData {
 	rawValue := v.RawValue
-	hasExampleOverride := false
-	if fmConfig != nil {
-		if override, ok := fmConfig.GetExampleOverride(v.Name); ok {
-			rawValue = override
-			hasExampleOverride = true
-		}
-	}
 
 	// Infer type
 	typ, resolved := roleTypes[v.Name]
-	if !resolved || hasExampleOverride {
+	if !resolved {
 		typ = typeInfer.InferType(v.Name, rawValue)
 	}
 	description := ""

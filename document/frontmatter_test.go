@@ -219,13 +219,15 @@ func TestShouldShowSectionGivesHideListPrecedence(t *testing.T) {
 }
 
 func TestGetExampleOverride(t *testing.T) {
-	cfg := &SaltboxAutomationConfig{Inventory: InventoryConfig{
-		ExampleOverrides: map[string]string{"sonarr_port": "8990"},
-	}}
+	fm, _, err := ParseFrontmatter("---\nsaltbox_automation:\n  inventory:\n    example_overrides:\n      sonarr_port: 8990\n---\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := fm.SaltboxAutomation
 
 	got, ok := cfg.GetExampleOverride("sonarr_port")
-	if !ok || got != "8990" {
-		t.Fatalf("GetExampleOverride() = %q, %t, want 8990, true", got, ok)
+	if !ok || len(got.Content) != 2 || got.Content[1].Value != "8990" {
+		t.Fatalf("GetExampleOverride() = %+v, %t, want 8990, true", got, ok)
 	}
 	if _, ok := cfg.GetExampleOverride("sonarr_missing"); ok {
 		t.Fatal("missing override reported present")

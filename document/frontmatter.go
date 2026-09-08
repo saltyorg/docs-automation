@@ -41,9 +41,9 @@ type SectionsConfig struct {
 
 // InventoryConfig controls the inventory section generation.
 type InventoryConfig struct {
-	ShowSections     []string          `yaml:"show_sections"`
-	HideSections     []string          `yaml:"hide_sections"`
-	ExampleOverrides map[string]string `yaml:"example_overrides"`
+	ShowSections     []string  `yaml:"show_sections"`
+	HideSections     []string  `yaml:"hide_sections"`
+	ExampleOverrides yaml.Node `yaml:"example_overrides"`
 }
 
 // AppLinkPurpose describes the semantic destination of an app link.
@@ -107,6 +107,11 @@ func ParseFrontmatter(content string) (*Frontmatter, string, error) {
 
 	if err := yaml.Unmarshal(rawFrontmatter, &fm); err != nil {
 		return nil, content, fmt.Errorf("parsing frontmatter YAML: %w", err)
+	}
+	if fm.SaltboxAutomation != nil {
+		if err := validateExampleOverrides(&fm.SaltboxAutomation.Inventory.ExampleOverrides); err != nil {
+			return nil, content, fmt.Errorf("parsing frontmatter YAML: %w", err)
+		}
 	}
 
 	return &fm, remainingContent, nil
@@ -250,13 +255,4 @@ func (c *SaltboxAutomationConfig) ShouldShowSection(sectionName string) bool {
 	}
 
 	return true
-}
-
-// GetExampleOverride returns the example override for a variable, if any.
-func (c *SaltboxAutomationConfig) GetExampleOverride(varName string) (string, bool) {
-	if c == nil || c.Inventory.ExampleOverrides == nil {
-		return "", false
-	}
-	val, ok := c.Inventory.ExampleOverrides[varName]
-	return val, ok
 }

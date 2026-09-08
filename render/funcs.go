@@ -15,6 +15,7 @@ func FuncMap() template.FuncMap {
 		"formatDescriptionComment": formatDescriptionComment,
 		"formatTypeComment":        formatTypeComment,
 		"typeKeyword":              typeKeyword,
+		"renderExampleOverride":    renderExampleOverride,
 
 		// Role variable functions
 		"renderMultilineValueAdjusted": renderMultilineValueAdjusted,

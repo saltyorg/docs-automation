@@ -34,7 +34,7 @@ func (m *Manager) LoadDocument(path string) (*Document, error) {
 
 	fm, body, err := ParseFrontmatter(string(content))
 	if err != nil {
-		return nil, fmt.Errorf("parsing frontmatter: %w", err)
+		return nil, fmt.Errorf("parsing frontmatter in %s: %w", path, err)
 	}
 
 	return &Document{

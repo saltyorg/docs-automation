@@ -63,15 +63,10 @@ func (r *Runner) generateRole(ctx context.Context, cfg *config.Config, sources r
 	// Note: Variable filtering is now done in BuildRoleData to ensure
 	// sections are also filtered consistently
 
-	// Try to load frontmatter from existing doc
-	var fmConfig *document.SaltboxAutomationConfig
 	docPath := getDocPath(cfg, roleName, repoType)
-	if docPath != "" {
-		if content, err := os.ReadFile(docPath); err == nil {
-			if fm, _, err := document.ParseFrontmatter(string(content)); err == nil && fm != nil {
-				fmConfig = fm.SaltboxAutomation
-			}
-		}
+	fmConfig, err := loadExistingFrontmatter(docPath)
+	if err != nil {
+		return err
 	}
 
 	// Build template data
@@ -179,15 +174,10 @@ func (r *Runner) generateRoleWithType(ctx context.Context, cfg *config.Config, s
 		return nil
 	}
 
-	// Try to load frontmatter from existing doc
-	var fmConfig *document.SaltboxAutomationConfig
 	docPath := getDocPath(cfg, roleName, repoType)
-	if docPath != "" {
-		if content, err := os.ReadFile(docPath); err == nil {
-			if fm, _, err := document.ParseFrontmatter(string(content)); err == nil && fm != nil {
-				fmConfig = fm.SaltboxAutomation
-			}
-		}
+	fmConfig, err := loadExistingFrontmatter(docPath)
+	if err != nil {
+		return err
 	}
 
 	// Build template data
@@ -209,6 +199,29 @@ func (r *Runner) generateRoleWithType(ctx context.Context, cfg *config.Config, s
 	r.printf("%s", output)
 
 	return nil
+}
+
+func loadExistingFrontmatter(docPath string) (*document.SaltboxAutomationConfig, error) {
+	if docPath == "" {
+		return nil, nil
+	}
+
+	content, err := os.ReadFile(docPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading documentation page %s: %w", docPath, err)
+	}
+
+	fm, _, err := document.ParseFrontmatter(string(content))
+	if err != nil {
+		return nil, fmt.Errorf("parsing frontmatter in documentation page %s: %w", docPath, err)
+	}
+	if fm == nil {
+		return nil, nil
+	}
+	return fm.SaltboxAutomation, nil
 }
 
 // listRoles returns all role names in a roles directory.

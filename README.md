@@ -709,11 +709,79 @@ precedence order.
 |-------|------|---------|-------------|
 | `show_sections` | list | `[]` | When non-empty, allow only matching section names |
 | `hide_sections` | list | `[]` | Hide matching section names |
-| `example_overrides` | map | `{}` | Replace the rendered example value for an exact variable name |
+| `example_overrides` | map of YAML values | `{}` | Add a separate Example Override for a displayed variable; never change its default or inferred type |
 
 Section matching is case-insensitive. `hide_sections` is checked first and
 wins over `show_sections`. The role parser always omits `Paths` and metadata
 sections, so those cannot be restored with `show_sections`.
+
+#### Native YAML examples
+
+Each `example_overrides` entry is the actual YAML value to show, using normal
+YAML typing. Lists and dictionaries can contain nested values; strings,
+booleans, integers, floats, nulls, and empty values are supported. For example:
+
+```yaml
+saltbox_automation:
+  inventory:
+    example_overrides:
+      backup_excludes_list_extra:
+        - "./nobackupapp/*"
+        - "./traefik/*.log*"
+      app_role_docker_envs_custom:
+        LOG_LEVEL: "debug"
+        ENABLE_FEATURE: "true"
+      app_role_docker_labels_custom: {example.label: "value"}
+      app_role_message: |-
+        First line
+        Second line
+      app_role_enabled: false
+      app_role_optional: null
+      app_role_port: "8080"
+```
+
+Use exact names from the page. These illustrative names do not create variables:
+examples appear only for variables already displayed, including Docker+ and
+Global Override Options. The default block remains authoritative; the example
+appears in a separate **Example Override** admonition below it.
+
+For each displayed scope, precedence is:
+
+1. An entry for that exact displayed variable name.
+2. An entry for its canonical role variable name, with only the assignment key
+   renamed for the instance view.
+3. The existing reusable Markdown or built-in example, if provided.
+
+For example, `app2_docker_envs_custom` overrides the instance example without
+changing the role example for `app_role_docker_envs_custom`. Explicit `null`,
+`false`, `0`, `""`, `[]`, and `{}` are present examples, not requests to fall back.
+Existing section filters and variable visibility still apply.
+
+Rendering retains block versus flow collections, quoting, literal (`|`) and
+folded (`>`) scalar styles, comments, tags, and mapping order. Indentation uses
+two spaces; wrapping and equivalent chomping indicators may be normalized while
+preserving the value. Quote Jinja expressions as valid YAML strings; expressions
+and `{role}`/`{variable}` text in native examples are displayed without evaluation
+or substitution. Tagged values are displayed without invoking custom tag handlers.
+The canonical docs site's source hook removes example metadata containing tags
+unsupported by MkDocs from its in-memory build input. Authored frontmatter and
+the generated YAML examples remain intact.
+
+Anchors, aliases, and merge keys may be used within a single example value.
+References to anchors in other examples or elsewhere in frontmatter, recursive
+aliases, duplicate keys, and malformed values are rejected. Each generated
+example must be independently copyable. Errors identify the page and example;
+an invalid page is not overwritten.
+
+**Migration:** older versions interpreted quoted strings as raw YAML snippets
+and replaced the displayed default. Convert a quoted list such as
+`backup_excludes_list_extra: '["./logs/*"]'` to a native sequence, for example
+`backup_excludes_list_extra: ["./logs/*"]`. Similarly, use `true` or `8080` for
+native boolean or integer examples. `"true"`, `"8080"`, and `"[]"` now remain
+strings. The canonical inventory template must be deployed with a compatible
+generator: make the updated generator available before adopting the new template
+and native frontmatter. Reusable `global_overrides`/`docker_overrides` Markdown
+`example` fields keep their existing contract.
 
 ### `app_links`
 
